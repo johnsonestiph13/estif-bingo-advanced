@@ -1,0 +1,49 @@
+{
+  "name": "estif-bingo-advanced",
+  "version": "4.0.0",
+  "description": "Estif Bingo 24/7 - Advanced Multiplayer Bingo Game with PostgreSQL, Telegram Bot Integration, Sounds, and Automated Migrations",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js",
+    "migrate": "node backend/scripts/run-migrations.js",
+    "migrate:manual": "node backend/scripts/manual-migrate.js",
+    "migrate:status": "node backend/scripts/migration-status.js",
+    "db:init": "node backend/scripts/init-database.js",
+    "seed": "node backend/scripts/seed-data.js",
+    "backup": "node backend/scripts/backup-database.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "bingo",
+    "multiplayer",
+    "game",
+    "socketio",
+    "telegram",
+    "postgresql",
+    "realtime"
+  ],
+  "author": "Estifanos Yhannis",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "pg": "^8.11.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

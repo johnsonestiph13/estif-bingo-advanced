@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="description" content="Estif Bingo 24/7 - Live Multiplayer Bingo Game">
+    <meta name="theme-color" content="#0a0f1e">
+    <title>Estif Bingo 24/7 – Live Bingo Game</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico">
+    <link rel="apple-touch-icon" href="/assets/images/logo.png">
+    
+    <!-- Google Fonts (fallback) -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- CSS Assets -->
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/components.css">
+    
+    <style>
+        /* Additional inline styles for background image */
+        body {
+            background-image: url('/assets/images/background.jpg');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }
+        
+        .stats-bar, .drawn-area, .players-section {
+            background: rgba(10, 20, 35, 0.85);
+            backdrop-filter: blur(12px);
+        }
+        
+        /* Logo in top bar */
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .logo-area img {
+            height: 45px;
+            width: auto;
+        }
+        
+        .game-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ffd966;
+        }
+        
+        @media (max-width: 768px) {
+            .logo-area img {
+                height: 35px;
+            }
+            .game-title {
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container" id="app">
+    <!-- Stats Bar with Logo -->
+    <div class="stats-bar">
+        <div class="logo-area">
+            <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
+            <span class="game-title">ESTIF BINGO 24/7</span>
+        </div>
+        <div class="stat balance">
+            <div class="stat-label">💰 BALANCE</div>
+            <div class="stat-value" id="balance">0</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">🎲 ROUND</div>
+            <div class="stat-value" id="round">1</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">🏆 POOL</div>
+            <div class="stat-value" id="pool">0</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">🎯 WIN %</div>
+            <div class="stat-value" id="winPercent">75</div>
+        </div>
+        <div class="stat timer" id="timerBox">
+            <div class="stat-label">⏱️ TIME</div>
+            <div class="stat-value timer-value" id="timer">00:00</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">👥 PLAYERS</div>
+            <div class="stat-value" id="playersCount">0</div>
+        </div>
+    </div>
+
+    <!-- Status Badge -->
+    <div style="text-align: center;">
+        <span id="statusMsg" class="status-badge">🔄 Connecting...</span>
+    </div>
+
+    <!-- Cartelas Grid -->
+    <div id="cartelasContainer" class="cartelas-grid"></div>
+
+    <!-- Drawn Numbers Area -->
+    <div class="drawn-area">
+        <div class="drawn-title">
+            <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">
+            Drawn Numbers
+        </div>
+        <div class="numbers-list" id="drawnNumbersList"></div>
+    </div>
+
+    <!-- Active Players Section -->
+    <div class="players-section">
+        <div class="drawn-title">
+            <img src="/assets/images/bingo-ball.png" alt="👥" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;">
+            Active Players
+        </div>
+        <div class="players-list" id="playersList"></div>
+    </div>
+
+    <!-- Round Message Container -->
+    <div id="roundMessage"></div>
+</div>
+
+<!-- Socket.IO -->
+<script src="/socket.io/socket.io.js"></script>
+
+<!-- JavaScript Modules -->
+<script src="/assets/js/utils.js"></script>
+<script src="/assets/js/sound.js"></script>
+<script src="/assets/js/cartela.js"></script>
+<script src="/assets/js/socket.js"></script>
+<script src="/assets/js/player.js"></script>
+
+<script>
+    // Additional initialization for assets that need DOM ready
+    document.addEventListener('DOMContentLoaded', function() {
+        // Preload logo and background images
+        const logoImg = new Image();
+        logoImg.src = '/assets/images/logo.png';
+        
+        const bgImg = new Image();
+        bgImg.src = '/assets/images/background.jpg';
+        
+        // Set sound pack from localStorage (admin can change)
+        if (localStorage.getItem('soundPack')) {
+            currentSoundPack = localStorage.getItem('soundPack');
+        }
+        
+        console.log('🎮 Estif Bingo 24/7 - Player UI Ready');
+        console.log(`🔊 Sound Pack: ${currentSoundPack}`);
+    });
+    
+    // Global variables for player.js
+    let currentSoundPack = localStorage.getItem('soundPack') || 'pack1';
+    
+    // Export for player.js
+    window.currentSoundPack = currentSoundPack;
+</script>
+</body>
+</html>

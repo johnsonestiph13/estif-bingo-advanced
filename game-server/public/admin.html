@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Estif Bingo - Admin Control Panel">
+    <meta name="theme-color" content="#0f0c29">
+    <title>Estif Bingo - Admin Panel</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico">
+    <link rel="apple-touch-icon" href="/assets/images/logo.png">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- CSS Assets -->
+    <link rel="stylesheet" href="/assets/css/admin.css">
+    <link rel="stylesheet" href="/assets/css/components.css">
+    
+    <style>
+        /* Additional inline styles */
+        body {
+            font-family: 'Poppins', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            background-attachment: fixed;
+        }
+        
+        /* Logo in top bar */
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .logo-area img {
+            height: 40px;
+            width: auto;
+        }
+        
+        .top-bar h1 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0;
+            font-size: 1.6rem;
+        }
+        
+        .info-text {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 10px;
+            text-align: center;
+        }
+        
+        @media (max-width: 768px) {
+            .logo-area img {
+                height: 30px;
+            }
+            .top-bar h1 {
+                font-size: 1.2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <!-- Login Section -->
+    <div id="loginSection" class="login-container">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <img src="/assets/images/logo.png" alt="Estif Bingo Logo" style="height: 60px;" onerror="this.style.display='none'">
+        </div>
+        <h2>🔐 Admin Login</h2>
+        <input type="email" id="adminEmail" placeholder="Email" value="admin@estif.com">
+        <input type="password" id="adminPassword" placeholder="Password" value="admin123">
+        <button id="loginBtn">Login</button>
+        <div id="loginError" class="error-msg"></div>
+    </div>
+
+    <!-- Admin Panel (hidden until login) -->
+    <div id="adminPanel" class="admin-panel">
+        <div class="top-bar">
+            <h1>
+                <div class="logo-area">
+                    <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
+                    <span>🎲 Estif Bingo Admin</span>
+                </div>
+            </h1>
+            <button class="logout-btn" id="logoutBtn">Logout</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="controls">🎮 Game Controls</button>
+            <button class="tab-btn" data-tab="reports">📊 Reports</button>
+            <button class="tab-btn" data-tab="players">👥 Online Players</button>
+            <button class="tab-btn" data-tab="sounds">🔊 Sound Settings</button>
+        </div>
+
+        <!-- Game Controls Tab -->
+        <div id="controlsTab" class="tab-content active">
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus">-</div></div>
+                <div class="stat-card"><div class="stat-label">Round</div><div class="stat-value" id="statRound">-</div></div>
+                <div class="stat-card"><div class="stat-label">Timer (sec)</div><div class="stat-value" id="statTimer">-</div></div>
+                <div class="stat-card"><div class="stat-label">Total Bet</div><div class="stat-value" id="statTotalBet">-</div></div>
+                <div class="stat-card"><div class="stat-label">Winner Reward</div><div class="stat-value" id="statWinnerReward">-</div></div>
+                <div class="stat-card"><div class="stat-label">Admin Commission</div><div class="stat-value" id="statCommission">-</div></div>
+                <div class="stat-card"><div class="stat-label">Players Online</div><div class="stat-value" id="statPlayersCount">-</div></div>
+                <div class="stat-card"><div class="stat-label">Win %</div><div class="stat-value" id="statWinPercent">-</div></div>
+            </div>
+            <div class="control-group">
+                <select id="winPercentSelect">
+                    <option value="70">70%</option>
+                    <option value="75">75%</option>
+                    <option value="76">76%</option>
+                    <option value="80">80%</option>
+                </select>
+                <button id="setWinPercentBtn" class="btn btn-primary">Set Win Percentage</button>
+                <button id="startGameBtn" class="btn btn-primary">🚀 Start Game (Force)</button>
+                <button id="endGameBtn" class="btn btn-danger">⏹️ End Round (No Winner)</button>
+                <button id="resetGameBtn" class="btn btn-warning">🔄 Reset Game (Round 1)</button>
+            </div>
+            <div id="actionMessage" style="margin-top: 10px; color: #ffd700;"></div>
+        </div>
+
+        <!-- Reports Tab -->
+        <div id="reportsTab" class="tab-content">
+            <div class="report-filters">
+                <select id="reportType">
+                    <option value="daily">📅 Daily</option>
+                    <option value="weekly">📆 Weekly</option>
+                    <option value="monthly">📆 Monthly</option>
+                    <option value="range">📊 Custom Range</option>
+                    <option value="commission">💰 Commission Breakdown</option>
+                </select>
+                <div id="dynamicDateInputs"></div>
+                <button id="fetchReportBtn" class="btn btn-primary">Fetch Report</button>
+            </div>
+            <div id="reportResult" style="overflow-x: auto;"></div>
+        </div>
+
+        <!-- Players Tab -->
+        <div id="playersTab" class="tab-content">
+            <div id="playersListContainer" class="players-list"></div>
+        </div>
+
+        <!-- Sound Settings Tab -->
+        <div id="soundsTab" class="tab-content">
+            <div class="control-group">
+                <label style="margin-right:10px">🎵 Select Sound Pack:</label>
+                <select id="soundPackSelect">
+                    <option value="pack1">🔊 Sound Pack 1 (Default)</option>
+                    <option value="pack2">🎵 Sound Pack 2</option>
+                    <option value="pack3">🎶 Sound Pack 3</option>
+                    <option value="pack4">🎼 Sound Pack 4</option>
+                </select>
+                <button id="applySoundPackBtn" class="btn btn-primary">Apply to Player Page</button>
+            </div>
+            <div class="info-text">
+                <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 16px; height: 16px; vertical-align: middle;">
+                ⚠️ This setting is saved in your browser and affects the player page only. Each player can choose their own sound pack.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/assets/js/utils.js"></script>
+<script>
+    // ---------- Helper functions ----------
+    let adminToken = localStorage.getItem('adminToken');
+    const API_BASE = ''; // relative to same origin
+
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminToken}`
+        };
+        const options = { method, headers };
+        if (body) options.body = JSON.stringify(body);
+        const res = await fetch(`${API_BASE}${endpoint}`, options);
+        if (res.status === 401) {
+            logout();
+            throw new Error('Session expired');
+        }
+        return res.json();
+    }
+
+    function showMessage(msg, isError = false) {
+        const msgDiv = document.getElementById('actionMessage');
+        if (msgDiv) {
+            msgDiv.innerText = msg;
+            msgDiv.style.color = isError ? '#ff6b6b' : '#ffd700';
+            setTimeout(() => { msgDiv.innerText = ''; }, 3000);
+        } else {
+            alert(msg);
+        }
+    }
+
+    async function refreshGameStats() {
+        try {
+            const data = await apiCall('/api/admin/stats');
+            if (data.success) {
+                document.getElementById('statStatus').innerText = data.status || '-';
+                document.getElementById('statRound').innerText = data.round || '-';
+                document.getElementById('statTimer').innerText = data.timer || '-';
+                document.getElementById('statTotalBet').innerText = (data.totalBet || 0).toFixed(2);
+                document.getElementById('statWinnerReward').innerText = (data.winnerReward || 0).toFixed(2);
+                document.getElementById('statCommission').innerText = (data.adminCommission || 0).toFixed(2);
+                document.getElementById('statPlayersCount').innerText = data.playersCount || 0;
+                document.getElementById('statWinPercent').innerText = `${data.winPercentage || 75}%`;
+                // sync dropdown
+                const select = document.getElementById('winPercentSelect');
+                if (select && data.winPercentage) select.value = data.winPercentage;
+            }
+        } catch (err) {
+            console.error('Stats error:', err);
+        }
+    }
+
+    async function loadOnlinePlayers() {
+        try {
+            const data = await apiCall('/api/admin/players');
+            if (data.success && data.players) {
+                const container = document.getElementById('playersListContainer');
+                container.innerHTML = '';
+                if (data.players.length === 0) {
+                    container.innerHTML = '<div class="player-card">No players online</div>';
+                } else {
+                    data.players.forEach(p => {
+                        const card = document.createElement('div');
+                        card.className = 'player-card';
+                        card.innerHTML = `<strong>${p.username}</strong> - ${p.selectedCount} cartelas | ${p.balance} ETB`;
+                        container.appendChild(card);
+                    });
+                }
+            } else {
+                document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Failed to load players</div>';
+            }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Error loading players</div>';
+        }
+    }
+
+    async function setWinPercentage() {
+        const percentage = parseInt(document.getElementById('winPercentSelect').value);
+        try {
+            const res = await apiCall('/api/admin/win-percentage', 'POST', { percentage });
+            if (res.success) {
+                showMessage(`Win percentage set to ${percentage}%`);
+                refreshGameStats();
+            } else {
+                showMessage(res.message || 'Failed', true);
+            }
+        } catch (err) {
+            showMessage('Error setting win percentage', true);
+        }
+    }
+
+    async function startGame() {
+        try {
+            const res = await apiCall('/api/admin/start-game', 'POST');
+            if (res.success) {
+                showMessage('Game started forcefully!');
+                refreshGameStats();
+            } else {
+                showMessage(res.message || 'Cannot start game', true);
+            }
+        } catch (err) {
+            showMessage('Error starting game', true);
+        }
+    }
+
+    async function endGame() {
+        if (confirm('End current round with no winner? This will skip to next round.')) {
+            try {
+                const res = await apiCall('/api/admin/end-game', 'POST');
+                if (res.success) {
+                    showMessage('Round ended');
+                    refreshGameStats();
+                } else {
+                    showMessage(res.message || 'Cannot end game', true);
+                }
+            } catch (err) {
+                showMessage('Error ending game', true);
+            }
+        }
+    }
+
+    async function resetGame() {
+        if (confirm('⚠️ RESET GAME to round 1? All current cartela selections will be lost. Players remain. Proceed?')) {
+            try {
+                const res = await apiCall('/api/admin/reset-game', 'POST');
+                if (res.success) {
+                    showMessage('Game reset to round 1');
+                    refreshGameStats();
+                } else {
+                    showMessage(res.message || 'Reset failed', true);
+                }
+            } catch (err) {
+                showMessage('Error resetting game', true);
+            }
+        }
+    }
+
+    // Report handling
+    function updateDateInputs() {
+        const type = document.getElementById('reportType').value;
+        const container = document.getElementById('dynamicDateInputs');
+        container.innerHTML = '';
+        if (type === 'daily') {
+            container.innerHTML = '<input type="date" id="reportDate" class="form-input" value="' + new Date().toISOString().slice(0,10) + '">';
+        } else if (type === 'weekly') {
+            const now = new Date();
+            const year = now.getFullYear();
+            const week = getWeekNumber(now);
+            container.innerHTML = `
+                <input type="number" id="weekYear" class="form-input" placeholder="Year" value="${year}" style="width:100px">
+                <input type="number" id="weekNum" class="form-input" placeholder="Week" value="${week}" style="width:100px">
+            `;
+        } else if (type === 'monthly') {
+            const now = new Date();
+            container.innerHTML = `
+                <input type="number" id="monthYear" class="form-input" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
+                <select id="monthNum" class="form-select">
+                    ${[...Array(12)].map((_, i) => `<option value="${i+1}" ${i+1 === now.getMonth()+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('default', {month:'long'})}</option>`).join('')}
+                </select>
+            `;
+        } else if (type === 'range') {
+            container.innerHTML = `
+                <input type="date" id="startDate" class="form-input" placeholder="Start Date">
+                <input type="date" id="endDate" class="form-input" placeholder="End Date">
+            `;
+        } else if (type === 'commission') {
+            // no extra inputs
+        }
+    }
+
+    function getWeekNumber(d) {
+        d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+        return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+    }
+
+    async function fetchReport() {
+        const type = document.getElementById('reportType').value;
+        let url = '';
+        if (type === 'daily') {
+            const date = document.getElementById('reportDate').value;
+            if (!date) return showMessage('Select date', true);
+            url = `/api/reports/daily?date=${date}`;
+        } else if (type === 'weekly') {
+            const year = document.getElementById('weekYear').value;
+            const week = document.getElementById('weekNum').value;
+            if (!year || !week) return showMessage('Enter year and week', true);
+            url = `/api/reports/weekly?year=${year}&week=${week}`;
+        } else if (type === 'monthly') {
+            const year = document.getElementById('monthYear').value;
+            const month = document.getElementById('monthNum').value;
+            url = `/api/reports/monthly?year=${year}&month=${month}`;
+        } else if (type === 'range') {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            if (!start || !end) return showMessage('Select start and end dates', true);
+            url = `/api/reports/range?startDate=${start}&endDate=${end}`;
+        } else if (type === 'commission') {
+            url = `/api/reports/commission`;
+        }
+        try {
+            const data = await apiCall(url);
+            if (data.success) {
+                displayReport(data, type);
+            } else {
+                showMessage('No data or error', true);
+            }
+        } catch (err) {
+            showMessage('Failed to fetch report', true);
+        }
+    }
+
+    function displayReport(data, type) {
+        const container = document.getElementById('reportResult');
+        if (type === 'commission') {
+            let html = '<h3>💰 Commission Breakdown</h3><table class="admin-table"><thead><tr><th>Round ID</th><th>Date</th><th>Total Pool</th><th>Winner Reward</th><th>Admin Commission</th><th>Win %</th></tr></thead><tbody>';
+            (data.commissionByRound || []).forEach(r => {
+                html += `<tr>
+                    <td>${r.round_id}</td>
+                    <td>${new Date(r.timestamp).toLocaleString()}</td>
+                    <td>${r.total_pool}</td>
+                    <td>${r.winner_reward}</td>
+                    <td>${r.admin_commission}</td>
+                    <td>${r.win_percentage}%</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        } else {
+            const report = data.report;
+            let html = `<h3>📊 Report: ${report.date || report.startDate || 'Custom Range'}</h3>`;
+            html += `<div class="stats-grid" style="margin-bottom: 20px;">
+                        <div class="stat-card"><div class="stat-label">Total Games</div><div class="stat-value">${report.totalGames}</div></div>
+                        <div class="stat-card"><div class="stat-label">Total Bet</div><div class="stat-value">${report.totalBet} ETB</div></div>
+                        <div class="stat-card"><div class="stat-label">Total Won</div><div class="stat-value">${report.totalWon} ETB</div></div>
+                        <div class="stat-card"><div class="stat-label">Total Commission</div><div class="stat-value">${report.totalCommission} ETB</div></div>
+                    </div>`;
+            if (report.rounds && report.rounds.length) {
+                html += '<table class="admin-table"><thead><tr><th>Round ID</th><th>Round #</th><th>Total Cartelas</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Winners</th><th>Time</th></tr></thead><tbody>';
+                report.rounds.forEach(r => {
+                    let winners = r.winners ? (Array.isArray(r.winners) ? r.winners.join(', ') : '-') : '-';
+                    html += `<tr>
+                        <td>${r.round_id}</td>
+                        <td>${r.round_number}</td>
+                        <td>${r.total_cartelas}</td>
+                        <td>${r.total_pool}</td>
+                        <td>${r.winner_reward}</td>
+                        <td>${r.admin_commission}</td>
+                        <td>${winners}</td>
+                        <td>${new Date(r.timestamp).toLocaleString()}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+            } else {
+                html += '<p>No rounds found.</p>';
+            }
+            container.innerHTML = html;
+        }
+    }
+
+    // Sound pack selection (stored in localStorage, affects player page)
+    function loadSoundPackSelection() {
+        const saved = localStorage.getItem('soundPack');
+        if (saved) {
+            document.getElementById('soundPackSelect').value = saved;
+        }
+    }
+    
+    function applySoundPack() {
+        const pack = document.getElementById('soundPackSelect').value;
+        localStorage.setItem('soundPack', pack);
+        showMessage(`✅ Sound pack set to ${pack}. It will be used on the player page.`);
+    }
+
+    // Login / Logout
+    function logout() {
+        localStorage.removeItem('adminToken');
+        adminToken = null;
+        document.getElementById('loginSection').style.display = 'block';
+        document.getElementById('adminPanel').style.display = 'none';
+        if (window.statsInterval) clearInterval(window.statsInterval);
+        if (window.playersInterval) clearInterval(window.playersInterval);
+    }
+
+    async function login() {
+        const email = document.getElementById('adminEmail').value;
+        const password = document.getElementById('adminPassword').value;
+        try {
+            const res = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (data.success && data.token) {
+                adminToken = data.token;
+                localStorage.setItem('adminToken', adminToken);
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('adminPanel').style.display = 'block';
+                refreshGameStats();
+                loadOnlinePlayers();
+                if (window.statsInterval) clearInterval(window.statsInterval);
+                window.statsInterval = setInterval(refreshGameStats, 5000);
+                if (window.playersInterval) clearInterval(window.playersInterval);
+                window.playersInterval = setInterval(loadOnlinePlayers, 10000);
+                loadSoundPackSelection();
+            } else {
+                document.getElementById('loginError').innerText = 'Invalid credentials';
+            }
+        } catch (err) {
+            document.getElementById('loginError').innerText = 'Login failed';
+        }
+    }
+
+    // Tab switching
+    function initTabs() {
+        const btns = document.querySelectorAll('.tab-btn');
+        btns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabId = btn.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                document.getElementById(`${tabId}Tab`).classList.add('active');
+                btns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                if (tabId === 'players') loadOnlinePlayers();
+                if (tabId === 'reports') updateDateInputs();
+            });
+        });
+    }
+
+    // On page load
+    window.onload = () => {
+        if (adminToken) {
+            fetch('/api/admin/stats', {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            }).then(res => {
+                if (res.status === 401) {
+                    logout();
+                } else {
+                    document.getElementById('loginSection').style.display = 'none';
+                    document.getElementById('adminPanel').style.display = 'block';
+                    refreshGameStats();
+                    loadOnlinePlayers();
+                    window.statsInterval = setInterval(refreshGameStats, 5000);
+                    window.playersInterval = setInterval(loadOnlinePlayers, 10000);
+                    loadSoundPackSelection();
+                }
+            }).catch(() => logout());
+        } else {
+            document.getElementById('loginSection').style.display = 'block';
+            document.getElementById('adminPanel').style.display = 'none';
+        }
+
+        document.getElementById('loginBtn').addEventListener('click', login);
+        document.getElementById('logoutBtn').addEventListener('click', logout);
+        document.getElementById('setWinPercentBtn').addEventListener('click', setWinPercentage);
+        document.getElementById('startGameBtn').addEventListener('click', startGame);
+        document.getElementById('endGameBtn').addEventListener('click', endGame);
+        document.getElementById('resetGameBtn').addEventListener('click', resetGame);
+        document.getElementById('reportType').addEventListener('change', updateDateInputs);
+        document.getElementById('fetchReportBtn').addEventListener('click', fetchReport);
+        document.getElementById('applySoundPackBtn').addEventListener('click', applySoundPack);
+        initTabs();
+        updateDateInputs();
+        loadSoundPackSelection();
+    };
+</script>
+</body>
+</html>
