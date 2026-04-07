@@ -1,9 +1,10 @@
-# db/database.py - FIXED VERSION
+# db/database.py - FIXED VERSION (Decimal/Float Conversion)
 
 import asyncpg
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
+from decimal import Decimal
 from ..config import (
     DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE, 
     DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
@@ -190,7 +191,7 @@ class Database:
                 telegram_id
             )
 
-    # ==================== BALANCE OPERATIONS ====================
+    # ==================== BALANCE OPERATIONS (FIXED) ====================
     
     @classmethod
     async def add_balance(cls, telegram_id: int, amount: float, 
@@ -205,7 +206,11 @@ class Database:
                 if not user:
                     raise ValueError("User not found")
                 
-                new_balance = user["balance"] + amount
+                # Convert Decimal to float for arithmetic
+                current_balance = float(user["balance"]) if user["balance"] else 0.0
+                current_total_deposited = float(user["total_deposited"]) if user["total_deposited"] else 0.0
+                
+                new_balance = current_balance + amount
                 await conn.execute(
                     "UPDATE users SET balance = $1 WHERE telegram_id = $2",
                     new_balance, telegram_id
@@ -213,9 +218,10 @@ class Database:
                 
                 # Only count positive amounts as deposits (exclude wins/refunds)
                 if amount > 0 and reason not in ("win", "refund", "deselect"):
+                    new_total = current_total_deposited + amount
                     await conn.execute(
-                        "UPDATE users SET total_deposited = total_deposited + $1 WHERE telegram_id = $2",
-                        amount, telegram_id
+                        "UPDATE users SET total_deposited = $1 WHERE telegram_id = $2",
+                        new_total, telegram_id
                     )
                 
                 return new_balance
@@ -232,10 +238,14 @@ class Database:
                 )
                 if not user:
                     raise ValueError("User not found")
-                if user["balance"] < amount:
+                
+                # Convert Decimal to float for arithmetic
+                current_balance = float(user["balance"]) if user["balance"] else 0.0
+                
+                if current_balance < amount:
                     raise ValueError("Insufficient balance")
                 
-                new_balance = user["balance"] - amount
+                new_balance = current_balance - amount
                 await conn.execute(
                     "UPDATE users SET balance = $1 WHERE telegram_id = $2",
                     new_balance, telegram_id
@@ -246,7 +256,9 @@ class Database:
     async def get_balance(cls, telegram_id: int) -> float:
         """Get user's current balance"""
         user = await cls.get_user(telegram_id)
-        return user["balance"] if user else 0.0
+        if user and user["balance"]:
+            return float(user["balance"])
+        return 0.0
 
     # ==================== OTP OPERATIONS ====================
     
@@ -352,16 +364,20 @@ class Database:
                 if not withdrawal:
                     return None
                 
+                # Convert amount to float
+                amount = float(withdrawal["amount"]) if withdrawal["amount"] else 0.0
+                
                 try:
-                    await cls.deduct_balance(withdrawal["telegram_id"], withdrawal["amount"], "cashout")
-                except ValueError:
+                    await cls.deduct_balance(withdrawal["telegram_id"], amount, "cashout")
+                except ValueError as e:
+                    logger.error(f"Cashout deduction failed: {e}")
                     return None
                 
                 await conn.execute(
                     "UPDATE pending_withdrawals SET status = 'approved', processed_at = NOW() WHERE id = $1",
                     withdrawal_id
                 )
-                return withdrawal["telegram_id"], withdrawal["amount"]
+                return withdrawal["telegram_id"], amount
 
     @classmethod
     async def reject_withdrawal(cls, withdrawal_id: int) -> None:
