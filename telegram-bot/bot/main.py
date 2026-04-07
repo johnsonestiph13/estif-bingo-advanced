@@ -1,4 +1,4 @@
-# main.py - COMPLETE FIXED VERSION
+# main.py - COMPLETE FIXED VERSION WITH PROPER EVENT LOOP
 
 import asyncio
 import logging
@@ -70,10 +70,10 @@ def run_flask():
     try:
         app = create_flask_app()
         if app:
-            # Use PORT environment variable (Render default is 10000, but we use 8080)
             port = int(os.environ.get('PORT', 8080))
             logger.info(f"Starting Flask API on port {port}")
-            app.run(host='0.0.0.0', port=port, threaded=True)
+            # Run Flask without debug mode
+            app.run(host='0.0.0.0', port=port, threaded=True, debug=False)
         else:
             logger.error("Flask app creation failed")
     except Exception as e:
@@ -166,7 +166,7 @@ async def main():
         
         logger.info("🤖 Estif Bingo Bot started successfully!")
         
-        # Start polling
+        # Start polling (this will run forever)
         await application.run_polling()
         
     except Exception as e:
@@ -175,10 +175,15 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Create new event loop and run
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.run(main())
+        loop.run_until_complete(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
+    finally:
+        loop.close()
