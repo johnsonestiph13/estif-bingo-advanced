@@ -22,7 +22,6 @@ for (const env of requiredEnv) {
 }
 
 // ==================== MIGRATION FLAG ====================
-// Set MANUAL_MIGRATION=true in environment to skip auto migrations
 const SKIP_AUTO_MIGRATIONS = process.env.MANUAL_MIGRATION === "true";
 
 // ==================== INITIALISE EXPRESS & SOCKET.IO ====================
@@ -40,7 +39,8 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "../../public")));
+// IMPORTANT: Correct path for your folder structure (server.js inside game-server/)
+app.use(express.static(path.join(__dirname, "public")));
 app.use(compression());
 
 // Rate limiting for API endpoints
@@ -76,7 +76,7 @@ async function callBotAPI(endpoint, body) {
     return response.json();
 }
 
-// ==================== POSTGRESQL DATABASE (Game Server) ====================
+// ==================== POSTGRESQL DATABASE ====================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
@@ -86,23 +86,14 @@ const pool = new Pool({
 });
 
 // ==================== MIGRATION SYSTEM ====================
-/**
- * Automated Migration Runner
- * - Creates migrations tracking table if not exists
- * - Runs only new migration files (by filename)
- * - Skips if MANUAL_MIGRATION=true
- * - Logs all migrations to console
- */
 async function runMigrations() {
     if (SKIP_AUTO_MIGRATIONS) {
         console.log("⚠️ MANUAL_MIGRATION=true - Skipping automatic migrations");
-        console.log("   Please run migrations manually using the migration script");
         return;
     }
 
     const migrationsDir = path.join(__dirname, "migrations");
     
-    // Check if migrations directory exists
     if (!fs.existsSync(migrationsDir)) {
         console.log("📁 No migrations directory found, skipping migrations");
         return;
@@ -110,7 +101,6 @@ async function runMigrations() {
 
     const client = await pool.connect();
     try {
-        // Create migrations tracking table if not exists
         await client.query(`
             CREATE TABLE IF NOT EXISTS migrations (
                 id SERIAL PRIMARY KEY,
@@ -120,17 +110,12 @@ async function runMigrations() {
             )
         `);
         
-        // Get already executed migrations
-        const executed = await client.query("SELECT name FROM migrations ORDER BY id");
+        const executed = await client.query("SELECT name FROM migrations");
         const executedSet = new Set(executed.rows.map(r => r.name));
         
-        // Get all SQL files from migrations directory
         const files = fs.readdirSync(migrationsDir)
             .filter(f => f.endsWith('.sql'))
-            .sort(); // Sort to ensure order (001, 002, 003...)
-        
-        let newMigrations = 0;
-        let failedMigrations = 0;
+            .sort();
         
         for (const file of files) {
             if (!executedSet.has(file)) {
@@ -142,22 +127,15 @@ async function runMigrations() {
                     await client.query('INSERT INTO migrations (name) VALUES ($1)', [file]);
                     await client.query('COMMIT');
                     console.log(`✅ Completed: ${file}`);
-                    newMigrations++;
                 } catch (err) {
                     await client.query('ROLLBACK');
                     console.error(`❌ Failed migration: ${file}`, err.message);
-                    failedMigrations++;
                     throw new Error(`Migration ${file} failed: ${err.message}`);
                 }
             }
         }
         
-        if (newMigrations > 0) {
-            console.log(`🎉 Migration summary: ${newMigrations} new, ${failedMigrations} failed`);
-        } else {
-            console.log("✅ No new migrations to run");
-        }
-        
+        console.log("✅ Migrations completed");
     } catch (err) {
         console.error("❌ Migration system error:", err);
         throw err;
@@ -166,13 +144,8 @@ async function runMigrations() {
     }
 }
 
-/**
- * Manual Migration Runner (for risky changes)
- * Usage: node server.js --manual-migrate migration_file.sql
- * Or call this function from admin endpoint
- */
 async function runManualMigration(migrationFile, options = {}) {
-    const { force = false, backup = true } = options;
+    const { force = false } = options;
     const migrationsDir = path.join(__dirname, "migrations");
     const filePath = path.join(migrationsDir, migrationFile);
     
@@ -182,19 +155,9 @@ async function runManualMigration(migrationFile, options = {}) {
     
     const client = await pool.connect();
     try {
-        // Check if already executed
         const check = await client.query("SELECT * FROM migrations WHERE name = $1", [migrationFile]);
         if (check.rows.length > 0 && !force) {
             throw new Error(`Migration ${migrationFile} already executed. Use force=true to re-run.`);
-        }
-        
-        // Optional backup before risky migration
-        if (backup) {
-            console.log(`📦 Creating backup before migration...`);
-            const backupName = `backup_${new Date().toISOString().replace(/[:.]/g, '_')}`;
-            await client.query(`CREATE SCHEMA IF NOT EXISTS ${backupName}`);
-            // Backup logic would go here - depends on your tables
-            console.log(`✅ Backup created: ${backupName}`);
         }
         
         const sql = fs.readFileSync(filePath, 'utf8');
@@ -208,19 +171,14 @@ async function runManualMigration(migrationFile, options = {}) {
         await client.query('COMMIT');
         console.log(`✅ Manual migration completed: ${migrationFile}`);
         return { success: true, message: `Migration ${migrationFile} completed` };
-        
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`❌ Manual migration failed:`, err);
         throw err;
     } finally {
         client.release();
     }
 }
 
-/**
- * Get migration status
- */
 async function getMigrationStatus() {
     const client = await pool.connect();
     try {
@@ -235,11 +193,10 @@ async function getMigrationStatus() {
     }
 }
 
-// ==================== INITIAL DATABASE SETUP (Core Tables) ====================
+// ==================== INITIAL DATABASE SETUP ====================
 async function initDatabase() {
     const client = await pool.connect();
     try {
-        // Core tables (always needed, separate from migrations)
         await client.query(`
             CREATE TABLE IF NOT EXISTS game_rounds (
                 round_id SERIAL PRIMARY KEY,
@@ -277,7 +234,6 @@ async function initDatabase() {
                 PRIMARY KEY (round_number, cartela_number)
             )
         `);
-        // Indexes
         await client.query(`CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_active_round_selections_round ON active_round_selections(round_number)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)`);
@@ -290,19 +246,14 @@ async function initDatabase() {
     }
 }
 
-// ==================== RUN MIGRATIONS ON STARTUP ====================
 async function initializeDatabase() {
-    // First create core tables
     await initDatabase();
-    
-    // Then run automated migrations
     try {
         await runMigrations();
         console.log("✅ Database initialization complete");
     } catch (err) {
         console.error("❌ Database initialization failed:", err);
         if (process.env.NODE_ENV === "production") {
-            console.error("Production mode: Exiting due to migration failure");
             process.exit(1);
         }
     }
@@ -317,7 +268,7 @@ async function logGameTransaction(telegramId, username, type, amount, cartela, r
 }
 
 // ==================== CARTELA DATA ====================
-const CARTELA_DATA_FILE = path.join(__dirname, "../../data/cartelas.json");
+const CARTELA_DATA_FILE = path.join(__dirname, "data/cartelas.json");
 let cartelaData = {};
 try {
     if (fs.existsSync(CARTELA_DATA_FILE)) {
@@ -337,7 +288,7 @@ const BET_AMOUNT = parseFloat(process.env.BET_AMOUNT) || 10;
 const WIN_PERCENTAGES = [70, 75, 76, 80];
 const DEFAULT_WIN_PERCENTAGE = 75;
 const MAX_CARTELAS = 2;
-const TOTAL_CARTELAS = 400;
+const TOTAL_CARTELAS = 1000;   // <-- 1000 CARTELAS
 
 // ==================== GLOBAL STATE ====================
 let gameState = {
@@ -752,7 +703,6 @@ app.post("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     }
 });
 
-// Migration status endpoint (admin only)
 app.get("/api/admin/migrations", verifyAdminToken, async (req, res) => {
     try {
         const status = await getMigrationStatus();
@@ -762,7 +712,6 @@ app.get("/api/admin/migrations", verifyAdminToken, async (req, res) => {
     }
 });
 
-// Manual migration endpoint (admin only - for risky changes)
 app.post("/api/admin/migrate", verifyAdminToken, async (req, res) => {
     const { migrationFile, force = false } = req.body;
     if (!migrationFile) {
@@ -1100,31 +1049,23 @@ process.on("SIGINT", gracefulShutdown);
 
 // ==================== START SERVER ====================
 async function startServer() {
-    // Initialize database (core tables + migrations)
     await initializeDatabase();
-    
-    // Load win percentage from bot
     await loadWinPercentage();
-    
-    // Start crash recovery
     setTimeout(() => recoverFromCrash(), 2000);
-    
-    // Start game timers
     startSelectionTimer();
     
-    // Start listening
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION 🎲                    ║
-║     📱 Player: https://estif-bingo-247.onrender.com/player.html           ║
-║     🔐 Admin:  https://estif-bingo-247.onrender.com/admin.html            ║
+║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (1000 CARTELAS) 🎲    ║
+║     📱 Player: https://estif-bingo-advanced.onrender.com/player.html      ║
+║     🔐 Admin:  https://estif-bingo-advanced.onrender.com/admin.html       ║
 ║     ✅ Commission adjustable (70/75/76/80) via admin panel                ║
 ║     ✅ Sound packs served from /public/sounds/                            ║
 ║     ✅ Full Telegram bot integration                                      ║
 ║     ✅ Automated migrations (run on startup)                              ║
-║     ✅ Manual migration support for risky changes                         ║
+║     ✅ 1000 unique cartelas (1-1000)                                      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
         `);
     });

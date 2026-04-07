@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="description" content="Estif Bingo 24/7 - Live Multiplayer Bingo Game">
+    <meta name="description" content="Estif Bingo 24/7 - Live Multiplayer Bingo Game with 1000 Cartelas">
     <meta name="theme-color" content="#0a0f1e">
     <title>Estif Bingo 24/7 – Live Bingo Game</title>
     
@@ -11,7 +11,7 @@
     <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico">
     <link rel="apple-touch-icon" href="/assets/images/logo.png">
     
-    <!-- Google Fonts (fallback) -->
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- CSS Assets -->
@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="/assets/css/components.css">
     
     <style>
-        /* Additional inline styles for background image */
+        /* Additional inline styles for background and logo */
         body {
             background-image: url('/assets/images/background.jpg');
             background-size: cover;
@@ -50,6 +50,13 @@
             color: #ffd966;
         }
         
+        /* Custom scrollbar for cartela grid */
+        .cartelas-grid {
+            max-height: 450px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        
         @media (max-width: 768px) {
             .logo-area img {
                 height: 35px;
@@ -57,6 +64,26 @@
             .game-title {
                 font-size: 0.9rem;
             }
+            .cartelas-grid {
+                max-height: 350px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .cartelas-grid {
+                max-height: 300px;
+            }
+        }
+        
+        /* Winner celebration animation */
+        .winner-glow {
+            animation: winnerFlash 0.5s ease-in-out 3;
+        }
+        
+        @keyframes winnerFlash {
+            0% { background: transparent; }
+            50% { background: rgba(255, 215, 0, 0.3); }
+            100% { background: transparent; }
         }
     </style>
 </head>
@@ -99,7 +126,7 @@
         <span id="statusMsg" class="status-badge">🔄 Connecting...</span>
     </div>
 
-    <!-- Cartelas Grid -->
+    <!-- Cartelas Grid - 1000 cartelas -->
     <div id="cartelasContainer" class="cartelas-grid"></div>
 
     <!-- Drawn Numbers Area -->
@@ -135,29 +162,352 @@
 <script src="/assets/js/player.js"></script>
 
 <script>
-    // Additional initialization for assets that need DOM ready
-    document.addEventListener('DOMContentLoaded', function() {
-        // Preload logo and background images
-        const logoImg = new Image();
-        logoImg.src = '/assets/images/logo.png';
-        
-        const bgImg = new Image();
-        bgImg.src = '/assets/images/background.jpg';
-        
-        // Set sound pack from localStorage (admin can change)
-        if (localStorage.getItem('soundPack')) {
-            currentSoundPack = localStorage.getItem('soundPack');
-        }
-        
-        console.log('🎮 Estif Bingo 24/7 - Player UI Ready');
-        console.log(`🔊 Sound Pack: ${currentSoundPack}`);
-    });
+    // ==================== ADVANCED PLAYER INITIALIZATION ====================
     
-    // Global variables for player.js
+    // Global configuration
+    window.TOTAL_CARTELAS = 1000;
+    window.BET_AMOUNT = 10;
+    window.MAX_CARTELAS_PER_ROUND = 2;
+    
+    // Sound pack from localStorage (admin can change)
     let currentSoundPack = localStorage.getItem('soundPack') || 'pack1';
     
-    // Export for player.js
-    window.currentSoundPack = currentSoundPack;
+    // Authentication - get token or code from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const authToken = urlParams.get('token');
+    const authCode = urlParams.get('code');
+    
+    if (!authToken && !authCode) {
+        document.getElementById('app').innerHTML = `
+            <div class="error-box">
+                <h3>❌ Access Denied</h3>
+                <p>Please use the Telegram bot to access this game.</p>
+                <button onclick="window.location.href='https://t.me/YourBotUsername'">Open Bot</button>
+            </div>
+        `;
+        throw new Error('No token or code provided');
+    }
+    
+    // Exchange code for token if needed
+    async function exchangeCodeForToken(code) {
+        try {
+            const response = await fetch('/api/exchange-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            });
+            const data = await response.json();
+            if (data.success && data.token) {
+                window.authToken = data.token;
+                window.history.replaceState({}, '', window.location.pathname);
+                return true;
+            }
+            throw new Error(data.message || 'Code exchange failed');
+        } catch (err) {
+            console.error('Exchange error:', err);
+            document.getElementById('app').innerHTML = `<div class="error-box">❌ Authentication failed: ${err.message}</div>`;
+            return false;
+        }
+    }
+    
+    // Initialize everything
+    async function initializeGame() {
+        // Handle code exchange if needed
+        if (authCode && !authToken) {
+            const success = await exchangeCodeForToken(authCode);
+            if (!success) return;
+        } else if (authToken) {
+            window.authToken = authToken;
+        }
+        
+        // Preload sound pack
+        if (window.soundManager) {
+            window.soundManager.setSoundPack(currentSoundPack);
+            window.soundManager.preload();
+        }
+        
+        // Initialize cartela manager with 1000 cartelas
+        if (window.cartelaManager) {
+            window.cartelaManager.totalCartelas = 1000;
+            window.cartelaManager.init('cartelasContainer', onCartelaSelect, onCartelaDeselect);
+        }
+        
+        // Initialize socket connection
+        if (window.socketManager) {
+            window.socketManager.connect();
+            window.socketManager.authenticate(window.authToken);
+            setupSocketEvents();
+        }
+        
+        // Fetch initial global stats
+        try {
+            const response = await fetch('/api/global-stats');
+            const data = await response.json();
+            if (data.success) {
+                document.getElementById('pool').innerText = data.totalBetAmount?.toFixed(2) || '0';
+                document.getElementById('winPercent').innerText = `${data.winPercentage || 75}%`;
+            }
+        } catch (err) {
+            console.warn('Failed to fetch global stats:', err);
+        }
+    }
+    
+    // Cartela selection handlers
+    function onCartelaSelect(cartelaId) {
+        if (window.socketManager) {
+            window.socketManager.selectCartela(cartelaId, (response) => {
+                if (!response.success) {
+                    showTemporaryMessage(response.error, 2000);
+                }
+            });
+        }
+    }
+    
+    function onCartelaDeselect(cartelaId) {
+        if (window.socketManager) {
+            window.socketManager.deselectCartela(cartelaId);
+        }
+    }
+    
+    // Setup socket event listeners
+    function setupSocketEvents() {
+        const sm = window.socketManager;
+        if (!sm) return;
+        
+        sm.on('authenticated', (data) => {
+            console.log('Authenticated:', data);
+            if (window.cartelaManager) {
+                window.cartelaManager.selectedCartelas = data.selectedCartelas || [];
+                window.cartelaManager.render();
+            }
+            if (window.gameState) {
+                window.gameState.myBalance = data.balance;
+                window.gameState.myUsername = data.username;
+            }
+            updateBalanceUI(data.balance);
+            document.getElementById('statusMsg').innerText = '✅ Connected! Game active';
+        });
+        
+        sm.on('gameState', (state) => {
+            if (window.gameState) {
+                window.gameState.status = state.status;
+                window.gameState.round = state.round;
+                window.gameState.winPercentage = state.winPercentage;
+            }
+            document.getElementById('round').innerText = state.round;
+            document.getElementById('winPercent').innerText = `${state.winPercentage}%`;
+            document.getElementById('pool').innerText = state.totalBet?.toFixed(2) || '0';
+            
+            let statusText = '';
+            if (state.status === 'selection') statusText = '🎲 SELECTION PHASE - Pick cartelas!';
+            else if (state.status === 'active') statusText = '🎯 GAME ACTIVE';
+            else statusText = '🏁 Round ended';
+            document.getElementById('statusMsg').innerText = statusText;
+            
+            if (window.cartelaManager) {
+                window.cartelaManager.updateAvailability(window.gameState?.myBalance || 0, state.status);
+            }
+            if (state.players) updatePlayersUI(state.players);
+        });
+        
+        sm.on('timerUpdate', (data) => {
+            document.getElementById('timer').innerText = formatTime(data.seconds);
+            const timerBox = document.getElementById('timerBox');
+            if (data.seconds <= 10 && data.seconds > 0) {
+                timerBox.classList.add('warning');
+                if (data.seconds === 10 && window.soundManager) {
+                    window.soundManager.playCountdown();
+                }
+            } else {
+                timerBox.classList.remove('warning');
+            }
+        });
+        
+        sm.on('selectionConfirmed', (data) => {
+            if (window.cartelaManager) {
+                window.cartelaManager.selectedCartelas = data.selectedCartelas;
+                window.cartelaManager.render();
+            }
+            if (window.gameState) window.gameState.myBalance = data.balance;
+            updateBalanceUI(data.balance);
+            showTemporaryMessage(`✅ Cartela ${data.cartela} selected!`, 1200);
+            if (window.soundManager) window.soundManager.playSelect();
+        });
+        
+        sm.on('selectionUpdated', (data) => {
+            if (window.cartelaManager) {
+                window.cartelaManager.selectedCartelas = data.selectedCartelas;
+                window.cartelaManager.render();
+            }
+            if (window.gameState) window.gameState.myBalance = data.balance;
+            updateBalanceUI(data.balance);
+        });
+        
+        sm.on('cartelaTaken', (data) => {
+            showTemporaryMessage(`⚠️ Cartela ${data.cartelaNumber} taken by ${data.takenBy}`, 2000);
+            if (window.cartelaManager) window.cartelaManager.render();
+        });
+        
+        sm.on('cartelaReleased', (data) => {
+            showTemporaryMessage(`📢 Cartela ${data.cartelaNumber} released by ${data.releasedBy}`, 1500);
+            if (window.cartelaManager) window.cartelaManager.render();
+        });
+        
+        sm.on('numberDrawn', (data) => {
+            if (window.gameState) {
+                if (!window.gameState.drawnNumbers) window.gameState.drawnNumbers = [];
+                window.gameState.drawnNumbers.push(data.number);
+            }
+            updateDrawnNumbersUI(window.gameState?.drawnNumbers || []);
+            if (window.soundManager) window.soundManager.playNumber(data.number);
+        });
+        
+        sm.on('gameStarted', (data) => {
+            if (window.gameState) window.gameState.drawnNumbers = [];
+            updateDrawnNumbersUI([]);
+            showTemporaryMessage(data.message, 4000);
+            if (window.gameState) window.gameState.status = 'active';
+            if (window.cartelaManager) {
+                window.cartelaManager.updateAvailability(window.gameState?.myBalance || 0, 'active');
+            }
+        });
+        
+        sm.on('roundEnded', (data) => {
+            const msgDiv = document.getElementById('roundMessage');
+            msgDiv.innerHTML = `<div class="round-message">${data.message}</div>`;
+            setTimeout(() => { msgDiv.innerHTML = ''; }, 5000);
+            if (window.gameState) window.gameState.status = 'ended';
+            if (window.cartelaManager) {
+                window.cartelaManager.updateAvailability(window.gameState?.myBalance || 0, 'ended');
+            }
+        });
+        
+        sm.on('youWon', (data) => {
+            if (window.soundManager) window.soundManager.playWin();
+            if (window.gameState) window.gameState.myBalance = data.newBalance;
+            updateBalanceUI(data.newBalance);
+            showTemporaryMessage(`🎉🎉 YOU WON ${data.amount.toFixed(2)} ETB! 🎉🎉`, 8000);
+            
+            // Add winner glow effect
+            document.body.classList.add('winner-glow');
+            setTimeout(() => document.body.classList.remove('winner-glow'), 1000);
+            
+            if (data.cartelaId && data.winningLines) {
+                showTemporaryMessage(`🏆 Winning cartela #${data.cartelaId} - Lines: ${data.winningLines.join(', ')}`, 6000);
+            }
+        });
+        
+        sm.on('nextRound', (data) => {
+            if (window.cartelaManager) {
+                window.cartelaManager.selectedCartelas = [];
+                window.cartelaManager.render();
+            }
+            if (window.gameState) {
+                window.gameState.drawnNumbers = [];
+                window.gameState.status = 'selection';
+                window.gameState.round = data.round;
+            }
+            updateDrawnNumbersUI([]);
+            document.getElementById('round').innerText = data.round;
+            showTemporaryMessage(data.message, 3000);
+            if (window.cartelaManager) {
+                window.cartelaManager.updateAvailability(window.gameState?.myBalance || 0, 'selection');
+            }
+        });
+        
+        sm.on('playersUpdate', (data) => {
+            updatePlayersUI(data.players);
+            document.getElementById('playersCount').innerText = data.count;
+        });
+        
+        sm.on('balanceUpdated', (data) => {
+            if (window.gameState) window.gameState.myBalance = data.balance;
+            updateBalanceUI(data.balance);
+            if (data.added) {
+                showTemporaryMessage(`💰 Balance increased by ${data.added.toFixed(2)} ETB`, 2000);
+            } else if (data.removed) {
+                showTemporaryMessage(`💸 Balance decreased by ${data.removed.toFixed(2)} ETB`, 2000);
+            }
+            if (window.cartelaManager) {
+                window.cartelaManager.updateAvailability(data.balance, window.gameState?.status);
+            }
+        });
+        
+        sm.on('error', (err) => {
+            showTemporaryMessage(`⚠️ ${err.message}`, 3000);
+        });
+        
+        sm.on('disconnect', () => {
+            document.getElementById('statusMsg').innerText = '🔴 Disconnected, reconnecting...';
+        });
+    }
+    
+    // UI Helper Functions
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    function updateBalanceUI(balance) {
+        const balanceEl = document.getElementById('balance');
+        if (balanceEl) balanceEl.innerText = balance?.toFixed(2) || '0';
+        if (window.gameState) window.gameState.myBalance = balance;
+    }
+    
+    function updateDrawnNumbersUI(numbers) {
+        const container = document.getElementById('drawnNumbersList');
+        if (!container) return;
+        container.innerHTML = '';
+        (numbers || []).forEach(num => {
+            const ball = document.createElement('div');
+            ball.className = 'number-ball';
+            ball.innerText = num;
+            container.appendChild(ball);
+        });
+    }
+    
+    function updatePlayersUI(players) {
+        const container = document.getElementById('playersList');
+        if (!container) return;
+        container.innerHTML = '';
+        (players || []).forEach(p => {
+            const badge = document.createElement('div');
+            badge.className = 'player-badge';
+            badge.innerText = `${p.username} (${p.selectedCount})`;
+            container.appendChild(badge);
+        });
+    }
+    
+    function showTemporaryMessage(msg, duration = 3000) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'round-message';
+        msgDiv.innerText = msg;
+        const app = document.getElementById('app');
+        const statsBar = document.querySelector('.stats-bar');
+        app.insertBefore(msgDiv, statsBar.nextSibling);
+        setTimeout(() => msgDiv.remove(), duration);
+    }
+    
+    // Game state object (accessible globally)
+    window.gameState = {
+        status: 'selection',
+        round: 1,
+        myBalance: 0,
+        myUsername: '',
+        drawnNumbers: []
+    };
+    
+    // Start the game
+    document.addEventListener('DOMContentLoaded', initializeGame);
+    
+    // Export for debugging
+    window.debug = {
+        gameState: () => window.gameState,
+        cartelaManager: () => window.cartelaManager,
+        socketManager: () => window.socketManager,
+        soundManager: () => window.soundManager
+    };
 </script>
 </body>
 </html>
