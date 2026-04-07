@@ -1,4 +1,4 @@
-# main.py - FIXED EVENT LOOP VERSION
+# main.py - RENDER COMPATIBLE VERSION
 
 import asyncio
 import logging
@@ -94,7 +94,7 @@ async def handle_all_text(update, context):
 
 
 async def main():
-    """Main entry point - properly handles event loop"""
+    """Main entry point"""
     # Initialize database
     await Database.init_pool()
     logger.info("✅ Database initialized")
@@ -145,16 +145,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        # Get or create event loop
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run main
-        loop.run_until_complete(main())
-        loop.close()
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
