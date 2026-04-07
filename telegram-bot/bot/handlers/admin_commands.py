@@ -2,6 +2,7 @@
 """Admin-only commands for deposit/cashout approval"""
 
 import logging
+from decimal import Decimal
 from telegram import Update
 from telegram.ext import ContextTypes
 from ..db.database import Database
@@ -35,9 +36,16 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ User {telegram_id} not found")
             return
         
-        new_balance = await Database.add_balance(telegram_id, amount, "deposit_approval")
+        # Get current balance (may be Decimal from DB)
+        current_balance = float(user["balance"]) if user["balance"] else 0.0
+        new_balance = current_balance + amount
+        
+        # Perform the balance update using the database method
+        await Database.add_balance(telegram_id, amount, "deposit_approval")
+        
         lang = user.get('lang', 'en')
         
+        # Notify the user
         await context.bot.send_message(
             chat_id=telegram_id,
             text=TEXTS[lang]['approved_deposit'].format(amount, new_balance),
@@ -122,7 +130,8 @@ async def approve_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if user:
             lang = user.get('lang', 'en')
-            new_balance = user['balance'] - amount
+            # Get updated balance (after deduction)
+            new_balance = float(user['balance']) - amount
             await context.bot.send_message(
                 chat_id=telegram_id,
                 text=TEXTS[lang]['approved_cashout'].format(amount, new_balance),
@@ -159,11 +168,10 @@ async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         withdrawal_id = int(context.args[0])
         reason = ' '.join(context.args[1:]) if len(context.args) > 1 else "Not specified"
         
-        # First get the withdrawal info before rejecting
+        # Get withdrawal details before rejecting
         withdrawal = await Database.get_withdrawal_by_id(withdrawal_id)
         
         if withdrawal:
-            # Reject the withdrawal
             await Database.reject_withdrawal(withdrawal_id)
             
             # Notify the user
