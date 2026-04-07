@@ -1,4 +1,4 @@
-# main.py - OPTIMIZED VERSION
+# main.py - FIXED EVENT LOOP VERSION
 
 import asyncio
 import logging
@@ -93,8 +93,18 @@ async def handle_all_text(update, context):
         await update.message.reply_text("❌ An error occurred. Please use the menu buttons.")
 
 
-async def start_bot():
-    """Start the bot application"""
+async def main():
+    """Main entry point - properly handles event loop"""
+    # Initialize database
+    await Database.init_pool()
+    logger.info("✅ Database initialized")
+    
+    # Start Flask API in background thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask API starting on port {FLASK_PORT}")
+    
+    # Create bot application
     application = Application.builder().token(BOT_TOKEN).build()
     
     # Command handlers
@@ -129,40 +139,24 @@ async def start_bot():
     
     logger.info("🤖 Estif Bingo Bot started successfully!")
     
-    # Start polling (blocks until stopped)
+    # Start polling - this will run until interrupted
     await application.run_polling()
 
 
-async def main_async():
-    """Main async entry point"""
+if __name__ == "__main__":
     try:
-        # Initialize database
-        await Database.init_pool()
-        logger.info("✅ Database initialized")
+        # Get or create event loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         
-        # Start Flask API in background thread
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        logger.info(f"Flask API starting on port {FLASK_PORT}")
-        
-        # Start the bot
-        await start_bot()
-        
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
-        raise
-
-
-def main():
-    """Main entry point"""
-    try:
-        asyncio.run(main_async())
+        # Run main
+        loop.run_until_complete(main())
+        loop.close()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
