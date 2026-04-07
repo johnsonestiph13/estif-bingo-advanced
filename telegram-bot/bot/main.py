@@ -15,7 +15,7 @@ from telegram.ext import (
 load_dotenv()
 
 # Import configurations
-from .config import BOT_TOKEN, FLASK_PORT, LOG_LEVEL, LOG_FORMAT
+from .config import BOT_TOKEN, LOG_LEVEL, LOG_FORMAT
 
 # Import database
 from .db.database import Database
@@ -70,7 +70,10 @@ def run_flask():
     try:
         app = create_flask_app()
         if app:
-            app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True)
+            # Use PORT environment variable (Render default is 10000, but we use 8080)
+            port = int(os.environ.get('PORT', 8080))
+            logger.info(f"Starting Flask API on port {port}")
+            app.run(host='0.0.0.0', port=port, threaded=True)
         else:
             logger.error("Flask app creation failed")
     except Exception as e:
@@ -127,7 +130,6 @@ async def main():
         # Start Flask API in background thread
         flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
-        logger.info(f"Flask API starting on port {FLASK_PORT}")
         
         # Create bot application
         application = Application.builder().token(BOT_TOKEN).build()
