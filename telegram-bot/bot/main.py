@@ -93,61 +93,56 @@ async def handle_all_text(update, context):
         await update.message.reply_text("❌ An error occurred. Please use the menu buttons.")
 
 
-async def main():
-    """Main entry point"""
-    # Initialize database
-    await Database.init_pool()
-    logger.info("✅ Database initialized")
-    
-    # Start Flask API in background thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"Flask API starting on port {FLASK_PORT}")
-    
-    # Create bot application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("balance", balance))
-    application.add_handler(CommandHandler("bingo", bingo_otp))
-    application.add_handler(CommandHandler("approve_deposit", approve_deposit))
-    application.add_handler(CommandHandler("reject_deposit", reject_deposit))
-    application.add_handler(CommandHandler("approve_cashout", approve_cashout))
-    application.add_handler(CommandHandler("reject_cashout", reject_cashout))
-    
-    # Message handlers (order matters - more specific first)
-    application.add_handler(MessageHandler(filters.PHOTO, handle_deposit_screenshot))
-    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-    
-    # Menu button handlers
-    application.add_handler(MessageHandler(filters.Regex("🎮 Play|🎮 ጨዋታ"), play))
-    application.add_handler(MessageHandler(filters.Regex("📝 Register|📝 ተመዝገብ"), register))
-    application.add_handler(MessageHandler(filters.Regex("💰 Deposit|💰 ገንዘብ አስገባ"), deposit))
-    application.add_handler(MessageHandler(filters.Regex("💳 Cash Out|💳 ገንዘብ አውጣ"), cashout))
-    application.add_handler(MessageHandler(filters.Regex("📞 Contact Center|📞 ደንበኛ አገልግሎት"), contact_center))
-    application.add_handler(MessageHandler(filters.Regex("🎉 Invite|🎉 ጋብዝ"), invite))
-    application.add_handler(MessageHandler(filters.Regex("🔐 Bingo Code|🔐 የቢንጎ ኮድ"), bingo_otp))
-    
-    # Flow handlers (catch-all for text)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
-    
-    # Callback handlers
-    application.add_handler(CallbackQueryHandler(language_callback, pattern="lang_"))
-    application.add_handler(CallbackQueryHandler(deposit_callback, pattern="dep_"))
-    application.add_handler(CallbackQueryHandler(cashout_callback, pattern="cash_"))
-    
-    logger.info("🤖 Estif Bingo Bot started successfully!")
-    
-    # Start polling - this will run until interrupted
-    await application.run_polling()
-
-
-if __name__ == "__main__":
+def main():
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        # ✅ Init DB (async safely)
+        asyncio.run(Database.init_pool())
+        logger.info("✅ Database initialized")
+
+        # ✅ Start Flask thread
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info(f"Flask API starting on port {FLASK_PORT}")
+
+        # ✅ Create bot
+        application = Application.builder().token(BOT_TOKEN).build()
+
+        # handlers here...
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("balance", balance))
+        application.add_handler(CommandHandler("bingo", bingo_otp))
+
+        application.add_handler(CommandHandler("approve_deposit", approve_deposit))
+        application.add_handler(CommandHandler("reject_deposit", reject_deposit))
+        application.add_handler(CommandHandler("approve_cashout", approve_cashout))
+        application.add_handler(CommandHandler("reject_cashout", reject_cashout))
+
+        application.add_handler(MessageHandler(filters.PHOTO, handle_deposit_screenshot))
+        application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+
+        application.add_handler(MessageHandler(filters.Regex("🎮 Play|🎮 ጨዋታ"), play))
+        application.add_handler(MessageHandler(filters.Regex("📝 Register|📝 ተመዝገብ"), register))
+        application.add_handler(MessageHandler(filters.Regex("💰 Deposit|💰 ገንዘብ አስገባ"), deposit))
+        application.add_handler(MessageHandler(filters.Regex("💳 Cash Out|💳 ገንዘብ አውጣ"), cashout))
+        application.add_handler(MessageHandler(filters.Regex("📞 Contact Center|📞 ደንበኛ አገልግሎት"), contact_center))
+        application.add_handler(MessageHandler(filters.Regex("🎉 Invite|🎉 ጋብዝ"), invite))
+        application.add_handler(MessageHandler(filters.Regex("🔐 Bingo Code|🔐 የቢንጎ ኮድ"), bingo_otp))
+
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
+
+        application.add_handler(CallbackQueryHandler(language_callback, pattern="lang_"))
+        application.add_handler(CallbackQueryHandler(deposit_callback, pattern="dep_"))
+        application.add_handler(CallbackQueryHandler(cashout_callback, pattern="cash_"))
+
+        logger.info("🤖 Estif Bingo Bot started successfully!")
+
+        # ✅ IMPORTANT: no await here
+        application.run_polling()
+
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
