@@ -1,4 +1,4 @@
-# main.py - SIMPLEST WORKING VERSION
+# main.py - POLLING WITH FIX
 
 import asyncio
 import logging
@@ -15,27 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 def run_flask():
-    """Run Flask API in background thread"""
     from .api import create_flask_app
     app = create_flask_app()
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
 
 async def main():
-    # Initialize database
     await Database.init_pool()
     logger.info("✅ Database initialized")
     
-    # Start Flask in background
     import threading
     threading.Thread(target=run_flask, daemon=True).start()
     logger.info(f"Flask API on port {FLASK_PORT}")
     
-    # Import handlers inside async function
-    from telegram.ext import (
-        Application, CommandHandler, MessageHandler,
-        filters, CallbackQueryHandler
-    )
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
     from .handlers.start import start, language_callback
     from .handlers.register import register, handle_contact
     from .handlers.deposit import deposit, deposit_callback, handle_deposit_amount, handle_deposit_screenshot
@@ -66,7 +59,6 @@ async def main():
         lang = user.get('lang', 'en') if user else 'en'
         await update.message.reply_text(TEXTS[lang]['use_menu'], reply_markup=menu(lang))
     
-    # Build application
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
@@ -96,7 +88,7 @@ async def main():
     
     logger.info("🤖 Estif Bingo Bot started successfully!")
     
-    # This blocks - let the bot run
+    # FIX: Use run_polling with proper parameters
     await application.run_polling()
 
 
