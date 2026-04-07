@@ -1,5 +1,4 @@
-# db/database.py
-"""PostgreSQL database operations for Estif Bingo Bot"""
+# db/database.py - FIXED VERSION
 
 import asyncpg
 import logging
@@ -41,9 +40,9 @@ class Database:
 
     @classmethod
     async def _init_tables(cls):
-        """Create all necessary tables if they don't exist"""
+        """Create all necessary tables in correct order"""
         async with cls._pool.acquire() as conn:
-            # Users table
+            # First, create users table (no foreign keys)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id BIGINT PRIMARY KEY,
@@ -61,11 +60,11 @@ class Database:
                 )
             """)
             
-            # Pending withdrawals
+            # Then create tables that reference users
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS pending_withdrawals (
                     id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id),
+                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
                     amount DECIMAL(12,2),
                     account TEXT,
                     method TEXT,
@@ -75,25 +74,23 @@ class Database:
                 )
             """)
             
-            # OTP codes
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS otp_codes (
-                    telegram_id BIGINT PRIMARY KEY,
+                    telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
                     otp TEXT,
                     expires_at TIMESTAMP
                 )
             """)
             
-            # Auth codes for game link
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS auth_codes (
                     code TEXT PRIMARY KEY,
-                    telegram_id BIGINT,
+                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
                     expires_at TIMESTAMP
                 )
             """)
             
-            # Settings table
+            # Settings table (no foreign keys)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -107,9 +104,10 @@ class Database:
                 ON CONFLICT (key) DO NOTHING
             """)
             
-            # Indexes for performance
+            # Create indexes after tables exist
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_expires ON otp_codes(expires_at)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_expires ON auth_codes(expires_at)")
             
@@ -131,7 +129,6 @@ class Database:
             executed_set = {row["name"] for row in executed}
             
             # Add migrations here as needed
-            # Example:
             # if "002_add_leaderboard.sql" not in executed_set:
             #     await conn.execute("ALTER TABLE users ADD COLUMN games_won INT DEFAULT 0")
             #     await conn.execute("INSERT INTO migrations (name) VALUES ('002_add_leaderboard.sql')")
