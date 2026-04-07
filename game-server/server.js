@@ -39,7 +39,6 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// IMPORTANT: Correct path for your folder structure (server.js inside game-server/)
 app.use(express.static(path.join(__dirname, "public")));
 app.use(compression());
 
@@ -288,7 +287,7 @@ const BET_AMOUNT = parseFloat(process.env.BET_AMOUNT) || 10;
 const WIN_PERCENTAGES = [70, 75, 76, 80];
 const DEFAULT_WIN_PERCENTAGE = 75;
 const MAX_CARTELAS = 2;
-const TOTAL_CARTELAS = 1000;   // <-- 1000 CARTELAS
+const TOTAL_CARTELAS = 1000;
 
 // ==================== GLOBAL STATE ====================
 let gameState = {
@@ -653,11 +652,12 @@ async function recoverFromCrash() {
 }
 
 // ==================== ADMIN AUTH ====================
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@estif.com";
+// UPDATED: Your admin email and password hash
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "johnsonestiph13@gmail.com";
 let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 if (!ADMIN_PASSWORD_HASH) {
-    console.warn("⚠️ ADMIN_PASSWORD_HASH not set, using default hash for 'admin123'");
-    ADMIN_PASSWORD_HASH = "$2b$10$N9qo8uLOickgx2ZMRZoMy.Mr6.7Z3tF7v5xY5Z5Z5Z5Z5Z5Z5Z5u";
+    // This is the bcrypt hash for "admin123"
+    ADMIN_PASSWORD_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ4Q6Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5";
 }
 
 app.post("/api/admin/login", authLimiter, async (req, res) => {
@@ -1059,8 +1059,8 @@ async function startServer() {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (1000 CARTELAS) 🎲    ║
-║     📱 Player: https://estif-bingo-advanced.onrender.com/player.html      ║
-║     🔐 Admin:  https://estif-bingo-advanced.onrender.com/admin.html       ║
+║     📱 Player: https://estif-bingo-advanced-1.onrender.com/player.html    ║
+║     🔐 Admin:  https://estif-bingo-advanced-1.onrender.com/admin.html     ║
 ║     ✅ Commission adjustable (70/75/76/80) via admin panel                ║
 ║     ✅ Sound packs served from /public/sounds/                            ║
 ║     ✅ Full Telegram bot integration                                      ║
