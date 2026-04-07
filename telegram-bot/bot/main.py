@@ -1,4 +1,4 @@
-# main.py - PRODUCTION READY FOR RENDER
+# main.py - WORKING VERSION FOR RENDER
 
 import asyncio
 import logging
@@ -29,17 +29,18 @@ from .handlers.admin_commands import (
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(__name__)
 
-# ========== FLASK (runs in separate thread, no asyncio issues) ==========
+
 def run_flask():
+    """Run Flask API server in a separate thread"""
     from .api import create_flask_app
     app = create_flask_app()
-    # Bind to 0.0.0.0 and use FLASK_PORT (internal, Render will not use this for web traffic)
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
-# ========== BOT HANDLERS ==========
+
 async def play(update, context):
     from .handlers.register import play as play_handler
     await play_handler(update, context)
+
 
 async def handle_all_text(update, context):
     if await handle_deposit_amount(update, context):
@@ -48,24 +49,24 @@ async def handle_all_text(update, context):
         return
     if await handle_cashout_account(update, context):
         return
-    from .db.database import Database
     from .texts.locales import TEXTS
     from .keyboards.menu import menu
     user = await Database.get_user(update.effective_user.id)
     lang = user.get('lang', 'en') if user else 'en'
     await update.message.reply_text(TEXTS[lang]['use_menu'], reply_markup=menu(lang))
 
-# ========== MAIN ==========
+
 async def main():
+    # Initialize database
     await Database.init_pool()
     logger.info("✅ Database initialized")
 
-    # Start Flask in a daemon thread (no need to await)
+    # Start Flask in background thread
     import threading
     threading.Thread(target=run_flask, daemon=True).start()
     logger.info(f"Flask API starting on port {FLASK_PORT}")
 
-    # Build bot application
+    # Create bot application
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Add handlers
@@ -96,8 +97,9 @@ async def main():
 
     logger.info("🤖 Estif Bingo Bot started successfully!")
 
-    # Start polling – this will block forever
+    # Start polling (this will block)
     await application.run_polling()
+
 
 if __name__ == "__main__":
     try:
