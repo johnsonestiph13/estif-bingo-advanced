@@ -1,8 +1,8 @@
 # handlers/register.py
-"""User registration handler with phone number and automatic welcome bonus"""
+"""User registration handler with phone number and play function"""
 
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from ..db.database import Database
 from ..texts.locales import TEXTS
@@ -11,7 +11,7 @@ from ..config import ADMIN_CHAT_ID, GAME_WEB_URL
 
 logger = logging.getLogger(__name__)
 
-# Welcome bonus amount in ETB
+# Welcome bonus amount
 WELCOME_BONUS_AMOUNT = 30
 
 
@@ -49,14 +49,12 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = existing.get('lang', 'en') if existing else 'en'
     
     if existing:
-        # Update existing user
         await Database.update_user(
             telegram_id,
             phone=contact.phone_number,
             registered=True,
             joined_group=True
         )
-        # If user was already registered but missing bonus, add it
         if existing.get('balance', 0) == 0:
             await Database.add_balance(telegram_id, WELCOME_BONUS_AMOUNT, "welcome_bonus")
             await update.message.reply_text(
@@ -64,7 +62,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
     else:
-        # Create new user
         await Database.create_user(
             telegram_id,
             user.username or "",
@@ -73,12 +70,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             contact.phone_number,
             lang
         )
-        
-        # Add welcome bonus for new user
         new_balance = await Database.add_balance(telegram_id, WELCOME_BONUS_AMOUNT, "welcome_bonus")
-        logger.info(f"Welcome bonus of {WELCOME_BONUS_AMOUNT} ETB added to user {telegram_id}")
-        
-        # Send welcome bonus message
         await update.message.reply_text(
             f"🎉 *Welcome to Estif Bingo!*\n\n"
             f"You received a welcome bonus of *{WELCOME_BONUS_AMOUNT} ETB*!\n"
@@ -86,14 +78,12 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     
-    # Send registration success message with game link
     await update.message.reply_text(
         TEXTS[lang]['register_success'].format(contact.phone_number, GAME_WEB_URL),
         reply_markup=menu(lang),
         parse_mode='Markdown'
     )
     
-    # Notify admin about new registration
     await context.bot.send_message(
         chat_id=ADMIN_CHAT_ID,
         text=f"🆕 NEW REGISTRATION\n"
@@ -104,4 +94,41 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    logger.info(f"New user registered: {telegram_id} - {user.first_name} - Bonus: {WELCOME_BONUS_AMOUNT} ETB")
+    logger.info(f"New user registered: {telegram_id} - {user.first_name}")
+
+
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send game link with authentication code"""
+    telegram_id = update.effective_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
+    
+    if not user or not user.get('registered'):
+        await update.message.reply_text(
+            "❌ Please register first using /register",
+            reply_markup=menu(lang)
+        )
+        return
+    
+    # Generate one-time auth code
+    try:
+        code = await Database.create_auth_code(telegram_id)
+        game_url = f"{GAME_WEB_URL}?code={code}"
+        
+        # Create inline keyboard with the game link
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎮 Play Now", url=game_url)]
+        ])
+        
+        await update.message.reply_text(
+            f"🎮 *Click the button below to start playing!*\n\n"
+            f"🔗 Or copy this link:\n`{game_url}`",
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Play error: {e}")
+        await update.message.reply_text(
+            "❌ Failed to generate game link. Please try again later.",
+            reply_markup=menu(lang)
+        )
