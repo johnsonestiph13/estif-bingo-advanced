@@ -36,6 +36,7 @@
         .logo-area img {
             height: 40px;
             width: auto;
+            object-fit: contain;
         }
         
         .top-bar h1 {
@@ -53,6 +54,18 @@
             text-align: center;
         }
         
+        /* Login logo */
+        .login-logo {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .login-logo img {
+            height: 80px;
+            width: auto;
+            object-fit: contain;
+        }
+        
         @media (max-width: 768px) {
             .logo-area img {
                 height: 30px;
@@ -60,6 +73,32 @@
             .top-bar h1 {
                 font-size: 1.2rem;
             }
+            .login-logo img {
+                height: 60px;
+            }
+        }
+        
+        /* Loading state */
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #ffd966;
+        }
+        
+        /* Error message styling */
+        .error-msg {
+            color: #ff6b6b;
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        /* Success message */
+        .success-msg {
+            color: #4cd964;
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -67,8 +106,8 @@
 <div class="container">
     <!-- Login Section -->
     <div id="loginSection" class="login-container">
-        <div style="text-align: center; margin-bottom: 20px;">
-            <img src="/assets/images/logo.png" alt="Estif Bingo Logo" style="height: 60px;" onerror="this.style.display='none'">
+        <div class="login-logo">
+            <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
         </div>
         <h2>🔐 Admin Login</h2>
         <input type="email" id="adminEmail" placeholder="Email" value="admin@estif.com">
@@ -157,7 +196,7 @@
                 <button id="applySoundPackBtn" class="btn btn-primary">Apply to Player Page</button>
             </div>
             <div class="info-text">
-                <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 16px; height: 16px; vertical-align: middle;">
+                <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 16px; height: 16px; vertical-align: middle;" onerror="this.style.display='none'">
                 ⚠️ This setting is saved in your browser and affects the player page only. Each player can choose their own sound pack.
             </div>
         </div>
@@ -169,6 +208,8 @@
     // ---------- Helper functions ----------
     let adminToken = localStorage.getItem('adminToken');
     const API_BASE = ''; // relative to same origin
+    let loginAttempts = 0;
+    const MAX_LOGIN_ATTEMPTS = 5;
 
     async function apiCall(endpoint, method = 'GET', body = null) {
         const headers = {
@@ -181,6 +222,9 @@
         if (res.status === 401) {
             logout();
             throw new Error('Session expired');
+        }
+        if (res.status === 429) {
+            throw new Error('Too many requests. Please wait a moment.');
         }
         return res.json();
     }
@@ -229,7 +273,7 @@
                     data.players.forEach(p => {
                         const card = document.createElement('div');
                         card.className = 'player-card';
-                        card.innerHTML = `<strong>${p.username}</strong> - ${p.selectedCount} cartelas | ${p.balance} ETB`;
+                        card.innerHTML = `<strong>${escapeHtml(p.username)}</strong> - ${p.selectedCount} cartelas | ${p.balance} ETB`;
                         container.appendChild(card);
                     });
                 }
@@ -240,6 +284,16 @@
             console.error(err);
             document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Error loading players</div>';
         }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
     }
 
     async function setWinPercentage() {
@@ -449,17 +503,36 @@
         document.getElementById('adminPanel').style.display = 'none';
         if (window.statsInterval) clearInterval(window.statsInterval);
         if (window.playersInterval) clearInterval(window.playersInterval);
+        loginAttempts = 0;
+        document.getElementById('loginError').innerText = '';
     }
 
     async function login() {
         const email = document.getElementById('adminEmail').value;
         const password = document.getElementById('adminPassword').value;
+        const errorDiv = document.getElementById('loginError');
+        
+        // Clear previous error
+        errorDiv.innerText = '';
+        
+        // Check login attempts
+        if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+            errorDiv.innerText = 'Too many failed attempts. Please wait 10 minutes.';
+            return;
+        }
+        
         try {
             const res = await fetch('/api/admin/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })
             });
+            
+            if (res.status === 429) {
+                errorDiv.innerText = 'Too many requests. Please wait a moment.';
+                return;
+            }
+            
             const data = await res.json();
             if (data.success && data.token) {
                 adminToken = data.token;
@@ -473,11 +546,13 @@
                 if (window.playersInterval) clearInterval(window.playersInterval);
                 window.playersInterval = setInterval(loadOnlinePlayers, 10000);
                 loadSoundPackSelection();
+                loginAttempts = 0;
             } else {
-                document.getElementById('loginError').innerText = 'Invalid credentials';
+                loginAttempts++;
+                errorDiv.innerText = `Invalid credentials (${loginAttempts}/${MAX_LOGIN_ATTEMPTS})`;
             }
         } catch (err) {
-            document.getElementById('loginError').innerText = 'Login failed';
+            errorDiv.innerText = 'Login failed. Please try again.';
         }
     }
 

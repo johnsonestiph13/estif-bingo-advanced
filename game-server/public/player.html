@@ -42,6 +42,7 @@
         .logo-area img {
             height: 45px;
             width: auto;
+            object-fit: contain;
         }
         
         .game-title {
@@ -55,6 +56,27 @@
             max-height: 450px;
             overflow-y: auto;
             scrollbar-width: thin;
+        }
+        
+        /* Error box styling */
+        .error-box {
+            background: linear-gradient(135deg, #c7354f, #a82840);
+            padding: 30px;
+            border-radius: 28px;
+            text-align: center;
+            margin: 50px auto;
+            max-width: 500px;
+        }
+        
+        .error-box button {
+            background: #ffd966;
+            color: #1a1a2e;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            margin-top: 15px;
+            cursor: pointer;
+            font-weight: bold;
         }
         
         @media (max-width: 768px) {
@@ -84,6 +106,21 @@
             0% { background: transparent; }
             50% { background: rgba(255, 215, 0, 0.3); }
             100% { background: transparent; }
+        }
+        
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #ffd966;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -132,7 +169,7 @@
     <!-- Drawn Numbers Area -->
     <div class="drawn-area">
         <div class="drawn-title">
-            <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">
+            <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;" onerror="this.style.display='none'">
             Drawn Numbers
         </div>
         <div class="numbers-list" id="drawnNumbersList"></div>
@@ -141,7 +178,7 @@
     <!-- Active Players Section -->
     <div class="players-section">
         <div class="drawn-title">
-            <img src="/assets/images/bingo-ball.png" alt="👥" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;">
+            <img src="/assets/images/bingo-ball.png" alt="👥" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;" onerror="this.style.display='none'">
             Active Players
         </div>
         <div class="players-list" id="playersList"></div>
@@ -182,7 +219,7 @@
             <div class="error-box">
                 <h3>❌ Access Denied</h3>
                 <p>Please use the Telegram bot to access this game.</p>
-                <button onclick="window.location.href='https://t.me/YourBotUsername'">Open Bot</button>
+                <button onclick="window.location.href='https://t.me/estif_bingo_bot'">Open Bot</button>
             </div>
         `;
         throw new Error('No token or code provided');
@@ -219,6 +256,10 @@
         } else if (authToken) {
             window.authToken = authToken;
         }
+        
+        // Show loading indicator
+        const statusMsg = document.getElementById('statusMsg');
+        if (statusMsg) statusMsg.innerHTML = '<div class="loading-spinner"></div> Connecting...';
         
         // Preload sound pack
         if (window.soundManager) {
@@ -285,7 +326,7 @@
                 window.gameState.myUsername = data.username;
             }
             updateBalanceUI(data.balance);
-            document.getElementById('statusMsg').innerText = '✅ Connected! Game active';
+            document.getElementById('statusMsg').innerHTML = '✅ Connected! Game active';
         });
         
         sm.on('gameState', (state) => {
@@ -302,7 +343,7 @@
             if (state.status === 'selection') statusText = '🎲 SELECTION PHASE - Pick cartelas!';
             else if (state.status === 'active') statusText = '🎯 GAME ACTIVE';
             else statusText = '🏁 Round ended';
-            document.getElementById('statusMsg').innerText = statusText;
+            document.getElementById('statusMsg').innerHTML = statusText;
             
             if (window.cartelaManager) {
                 window.cartelaManager.updateAvailability(window.gameState?.myBalance || 0, state.status);
@@ -438,7 +479,7 @@
         });
         
         sm.on('disconnect', () => {
-            document.getElementById('statusMsg').innerText = '🔴 Disconnected, reconnecting...';
+            document.getElementById('statusMsg').innerHTML = '🔴 Disconnected, reconnecting...';
         });
     }
     
@@ -465,6 +506,8 @@
             ball.innerText = num;
             container.appendChild(ball);
         });
+        // Auto-scroll to bottom
+        container.scrollTop = container.scrollHeight;
     }
     
     function updatePlayersUI(players) {
@@ -474,8 +517,18 @@
         (players || []).forEach(p => {
             const badge = document.createElement('div');
             badge.className = 'player-badge';
-            badge.innerText = `${p.username} (${p.selectedCount})`;
+            badge.innerText = `${escapeHtml(p.username)} (${p.selectedCount})`;
             container.appendChild(badge);
+        });
+    }
+    
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
         });
     }
     
