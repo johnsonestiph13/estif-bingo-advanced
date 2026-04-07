@@ -1,34 +1,33 @@
-# main.py - POLLING WITH FIX
+# main.py - WORKING VERSION FOR RENDER
 
 import asyncio
 import logging
 import sys
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from .config import BOT_TOKEN, FLASK_PORT
+from .config import BOT_TOKEN, FLASK_PORT, LOG_LEVEL, LOG_FORMAT
 from .db.database import Database
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(__name__)
 
 
 def run_flask():
+    """Run Flask in a separate thread"""
     from .api import create_flask_app
     app = create_flask_app()
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
 
-async def main():
-    await Database.init_pool()
-    logger.info("✅ Database initialized")
-    
-    import threading
-    threading.Thread(target=run_flask, daemon=True).start()
-    logger.info(f"Flask API on port {FLASK_PORT}")
-    
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+def run_bot():
+    """Run Telegram bot in a separate thread"""
+    from telegram.ext import (
+        Application, CommandHandler, MessageHandler,
+        filters, CallbackQueryHandler
+    )
     from .handlers.start import start, language_callback
     from .handlers.register import register, handle_contact
     from .handlers.deposit import deposit, deposit_callback, handle_deposit_amount, handle_deposit_screenshot
@@ -59,8 +58,10 @@ async def main():
         lang = user.get('lang', 'en') if user else 'en'
         await update.message.reply_text(TEXTS[lang]['use_menu'], reply_markup=menu(lang))
     
+    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("balance", balance))
     application.add_handler(CommandHandler("bingo", bingo_otp))
@@ -88,15 +89,32 @@ async def main():
     
     logger.info("🤖 Estif Bingo Bot started successfully!")
     
-    # FIX: Use run_polling with proper parameters
-    await application.run_polling()
+    # Run the bot (this blocks)
+    application.run_polling()
+
+
+def main():
+    """Main entry point"""
+    # Run database init in async loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(Database.init_pool())
+    logger.info("✅ Database initialized")
+    
+    # Start Flask in background thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask API on port {FLASK_PORT}")
+    
+    # Run bot in main thread (this blocks)
+    run_bot()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
-        logger.info("Bot stopped")
+        logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
