@@ -1,9 +1,6 @@
--- =====================================================
--- ESTIF BINGO 24/7 - INITIAL DATABASE SCHEMA
--- Migration: 001_init.sql
--- =====================================================
+-- Migration 001_init.sql
+-- Core tables for Estif Bingo game server
 
--- ==================== GAME ROUNDS TABLE ====================
 CREATE TABLE IF NOT EXISTS game_rounds (
     round_id SERIAL PRIMARY KEY,
     round_number INTEGER NOT NULL,
@@ -18,11 +15,6 @@ CREATE TABLE IF NOT EXISTS game_rounds (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE game_rounds IS 'Stores completed game rounds history';
-COMMENT ON COLUMN game_rounds.winners IS 'JSON array of winner usernames';
-COMMENT ON COLUMN game_rounds.winner_cartelas IS 'JSON array of winning cartela details';
-
--- ==================== GAME TRANSACTIONS TABLE ====================
 CREATE TABLE IF NOT EXISTS game_transactions (
     id SERIAL PRIMARY KEY,
     telegram_id BIGINT NOT NULL,
@@ -35,12 +27,6 @@ CREATE TABLE IF NOT EXISTS game_transactions (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE game_transactions ADD CONSTRAINT IF NOT EXISTS chk_transaction_type 
-    CHECK (type IN ('bet', 'win', 'refund', 'admin_add', 'admin_remove'));
-
-COMMENT ON TABLE game_transactions IS 'Logs all game-related balance transactions';
-
--- ==================== ACTIVE ROUND SELECTIONS TABLE ====================
 CREATE TABLE IF NOT EXISTS active_round_selections (
     round_number INTEGER NOT NULL,
     cartela_number INTEGER NOT NULL,
@@ -49,19 +35,8 @@ CREATE TABLE IF NOT EXISTS active_round_selections (
     PRIMARY KEY (round_number, cartela_number)
 );
 
-COMMENT ON TABLE active_round_selections IS 'Stores active cartela selections for crash recovery';
-
--- ==================== INDEXES ====================
 CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_game_rounds_round_number ON game_rounds(round_number DESC);
 CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id);
 CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp ON game_transactions(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_game_transactions_type ON game_transactions(type);
 CREATE INDEX IF NOT EXISTS idx_active_round_selections_round ON active_round_selections(round_number);
-CREATE INDEX IF NOT EXISTS idx_active_round_selections_telegram ON active_round_selections(telegram_id);
-
--- ==================== VERIFICATION ====================
-DO $$
-BEGIN
-    RAISE NOTICE '✅ Migration 001_init.sql completed successfully';
-END $$;
