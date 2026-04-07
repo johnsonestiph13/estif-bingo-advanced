@@ -1,18 +1,11 @@
 {
   "name": "estif-bingo-advanced",
   "version": "4.0.0",
-  "description": "Estif Bingo 24/7 - Advanced Multiplayer Bingo Game with PostgreSQL, Telegram Bot Integration, Sounds, and Automated Migrations",
-  "main": "backend/server.js",
+  "description": "Estif Bingo 24/7 - Advanced Multiplayer Bingo Game",
+  "main": "server.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "migrate": "node backend/scripts/run-migrations.js",
-    "migrate:manual": "node backend/scripts/manual-migrate.js",
-    "migrate:status": "node backend/scripts/migration-status.js",
-    "db:init": "node backend/scripts/init-database.js",
-    "seed": "node backend/scripts/seed-data.js",
-    "backup": "node backend/scripts/backup-database.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [
     "bingo",
