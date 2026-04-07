@@ -1,10 +1,9 @@
-# api/webhooks.py (FIXED - NO EVENT LOOP CONFLICT)
+# api/webhooks.py - SIMPLIFIED VERSION
 
 import logging
 import hmac
 import hashlib
 import os
-import asyncio
 from flask import Blueprint, request, jsonify
 from ..db.database import Database
 
@@ -18,20 +17,8 @@ PAYMENT_WEBHOOK_SECRET = os.environ.get("PAYMENT_WEBHOOK_SECRET", None)
 def verify_webhook_signature(data: bytes, signature: str, secret: str) -> bool:
     if not signature or not secret:
         return False
-
-    expected = hmac.new(
-        secret.encode(),
-        data,
-        hashlib.sha256
-    ).hexdigest()
-
+    expected = hmac.new(secret.encode(), data, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
-
-
-def run_async(coro):
-    """Safely run async DB calls inside Flask"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(coro)
 
 
 @webhook_bp.route('/api/webhook/deposit', methods=['POST'])
@@ -54,12 +41,16 @@ def deposit_webhook():
         if not telegram_id or not amount:
             return jsonify({"success": False, "message": "Missing fields"}), 400
 
-        # ✅ FIX: run async safely
-        new_balance = run_async(
+        # Run async operation
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        new_balance = loop.run_until_complete(
             Database.add_balance(telegram_id, amount, "auto_deposit")
         )
+        loop.close()
 
-        logger.info(f"Auto-deposit: {telegram_id} +{amount} Birr")
+        logger.info(f"Auto-deposit: {telegram_id} +{amount} Birr, new balance: {new_balance}")
 
         return jsonify({
             "success": True,
@@ -92,27 +83,34 @@ def withdrawal_webhook():
             return jsonify({"success": False, "message": "Missing withdrawal_id"}), 400
 
         if status == 'failed':
-            async def refund():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            async def process_refund():
                 async with Database._pool.acquire() as conn:
                     row = await conn.fetchrow(
                         "SELECT telegram_id, amount FROM pending_withdrawals WHERE id=$1 AND status='pending'",
                         withdrawal_id
                     )
-
                     if row:
                         await Database.add_balance(
                             row["telegram_id"],
                             row["amount"],
                             "withdrawal_refund"
                         )
-
                         await conn.execute(
                             "UPDATE pending_withdrawals SET status='failed' WHERE id=$1",
                             withdrawal_id
                         )
-
-            run_async(refund())
-            logger.info(f"Withdrawal {withdrawal_id} refunded")
+                        return row["amount"]
+                return None
+            
+            refund_amount = loop.run_until_complete(process_refund())
+            loop.close()
+            
+            if refund_amount:
+                logger.info(f"Withdrawal {withdrawal_id} failed, refunded {refund_amount} Birr")
 
         return jsonify({"success": True})
 
@@ -124,9 +122,9 @@ def withdrawal_webhook():
 @webhook_bp.route('/api/webhook/test', methods=['POST'])
 def test_webhook():
     data = request.get_json()
-    logger.info(f"Test webhook: {data}")
-
+    logger.info(f"Test webhook received: {data}")
     return jsonify({
         "success": True,
-        "received": data
+        "received": data,
+        "timestamp": __import__('datetime').datetime.utcnow().isoformat()
     })
