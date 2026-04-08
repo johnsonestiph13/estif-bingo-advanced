@@ -1,4 +1,4 @@
-# db/database.py - FIXED VERSION (Decimal/Float Conversion)
+# db/database.py - COMPLETE FIXED VERSION
 
 import asyncpg
 import logging
@@ -196,7 +196,7 @@ class Database:
     @classmethod
     async def add_balance(cls, telegram_id: int, amount: float, 
                           reason: str = None) -> float:
-        """Add balance to user with transaction lock"""
+        """Add balance to user with proper Decimal handling"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 user = await conn.fetchrow(
@@ -217,7 +217,7 @@ class Database:
                 )
                 
                 # Only count positive amounts as deposits (exclude wins/refunds)
-                if amount > 0 and reason not in ("win", "refund", "deselect"):
+                if amount > 0 and reason not in ("win", "refund", "deselect", "withdrawal_refund"):
                     new_total = current_total_deposited + amount
                     await conn.execute(
                         "UPDATE users SET total_deposited = $1 WHERE telegram_id = $2",
@@ -229,7 +229,7 @@ class Database:
     @classmethod
     async def deduct_balance(cls, telegram_id: int, amount: float,
                              reason: str = None) -> float:
-        """Deduct balance from user with transaction lock"""
+        """Deduct balance from user with proper Decimal handling"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 user = await conn.fetchrow(
@@ -243,7 +243,7 @@ class Database:
                 current_balance = float(user["balance"]) if user["balance"] else 0.0
                 
                 if current_balance < amount:
-                    raise ValueError("Insufficient balance")
+                    raise ValueError(f"Insufficient balance: {current_balance} < {amount}")
                 
                 new_balance = current_balance - amount
                 await conn.execute(
@@ -254,7 +254,7 @@ class Database:
 
     @classmethod
     async def get_balance(cls, telegram_id: int) -> float:
-        """Get user's current balance"""
+        """Get user's current balance as float"""
         user = await cls.get_user(telegram_id)
         if user and user["balance"]:
             return float(user["balance"])
@@ -362,22 +362,28 @@ class Database:
                     withdrawal_id
                 )
                 if not withdrawal:
+                    logger.warning(f"Withdrawal {withdrawal_id} not found or already processed")
                     return None
                 
-                # Convert amount to float
+                telegram_id = withdrawal["telegram_id"]
                 amount = float(withdrawal["amount"]) if withdrawal["amount"] else 0.0
                 
+                logger.info(f"Processing cashout: user={telegram_id}, amount={amount}")
+                
+                # Deduct balance
                 try:
-                    await cls.deduct_balance(withdrawal["telegram_id"], amount, "cashout")
+                    new_balance = await cls.deduct_balance(telegram_id, amount, "cashout")
+                    logger.info(f"Balance deducted successfully. New balance: {new_balance}")
                 except ValueError as e:
-                    logger.error(f"Cashout deduction failed: {e}")
+                    logger.error(f"Balance deduction failed for withdrawal {withdrawal_id}: {e}")
                     return None
                 
                 await conn.execute(
                     "UPDATE pending_withdrawals SET status = 'approved', processed_at = NOW() WHERE id = $1",
                     withdrawal_id
                 )
-                return withdrawal["telegram_id"], amount
+                
+                return telegram_id, amount
 
     @classmethod
     async def reject_withdrawal(cls, withdrawal_id: int) -> None:

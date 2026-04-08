@@ -2,7 +2,6 @@
 """Admin-only commands for deposit/cashout approval"""
 
 import logging
-from decimal import Decimal
 from telegram import Update
 from telegram.ext import ContextTypes
 from ..db.database import Database
@@ -31,19 +30,22 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         telegram_id = int(context.args[0])
         amount = float(context.args[1])
         
-        user = await Database.get_user(telegram_id)
-        if not user:
+        # Get user BEFORE update
+        user_before = await Database.get_user(telegram_id)
+        if not user_before:
             await update.message.reply_text(f"❌ User {telegram_id} not found")
             return
         
-        # Get current balance (may be Decimal from DB)
-        current_balance = float(user["balance"]) if user["balance"] else 0.0
-        new_balance = current_balance + amount
+        old_balance = float(user_before["balance"]) if user_before["balance"] else 0.0
         
-        # Perform the balance update using the database method
+        # Perform the balance update
         await Database.add_balance(telegram_id, amount, "deposit_approval")
         
-        lang = user.get('lang', 'en')
+        # Get user AFTER update
+        user_after = await Database.get_user(telegram_id)
+        new_balance = float(user_after["balance"]) if user_after["balance"] else 0.0
+        
+        lang = user_before.get('lang', 'en')
         
         # Notify the user
         await context.bot.send_message(
@@ -54,11 +56,12 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         await update.message.reply_text(
-            f"✅ Deposit of {amount} Birr approved for user {telegram_id}\n"
-            f"💰 New balance: {new_balance} Birr"
+            f"✅ Deposit approved for user {telegram_id}\n"
+            f"💰 Amount: {amount} Birr\n"
+            f"📊 Balance: {old_balance} → {new_balance} Birr"
         )
         
-        logger.info(f"Deposit approved: {telegram_id} - {amount} Birr")
+        logger.info(f"Deposit approved: {telegram_id} - {amount} Birr (balance: {old_balance} → {new_balance})")
         
     except ValueError:
         await update.message.reply_text("❌ Invalid USER_ID or AMOUNT format")
@@ -119,30 +122,64 @@ async def approve_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         withdrawal_id = int(context.args[0])
+        
+        # Get withdrawal details BEFORE approving
+        withdrawal = await Database.get_withdrawal_by_id(withdrawal_id)
+        if not withdrawal:
+            await update.message.reply_text("❌ Withdrawal not found")
+            return
+        
+        if withdrawal.get("status") != "pending":
+            await update.message.reply_text(f"❌ Withdrawal already {withdrawal.get('status')}")
+            return
+        
+        telegram_id = withdrawal["telegram_id"]
+        amount = float(withdrawal["amount"]) if withdrawal["amount"] else 0.0
+        
+        # Get user BEFORE deduction
+        user_before = await Database.get_user(telegram_id)
+        if not user_before:
+            await update.message.reply_text(f"❌ User {telegram_id} not found")
+            return
+        
+        old_balance = float(user_before["balance"]) if user_before["balance"] else 0.0
+        
+        # Check sufficient balance
+        if old_balance < amount:
+            await update.message.reply_text(
+                f"❌ Insufficient balance! User has {old_balance} Birr, requested {amount} Birr"
+            )
+            return
+        
+        # Approve withdrawal (this deducts balance)
         result = await Database.approve_withdrawal(withdrawal_id)
         
         if not result:
-            await update.message.reply_text("❌ Withdrawal not found or already processed")
+            await update.message.reply_text("❌ Failed to approve withdrawal")
             return
         
-        telegram_id, amount = result
-        user = await Database.get_user(telegram_id)
+        # Get user AFTER deduction
+        user_after = await Database.get_user(telegram_id)
+        new_balance = float(user_after["balance"]) if user_after["balance"] else 0.0
         
-        if user:
-            lang = user.get('lang', 'en')
-            # Get updated balance (after deduction)
-            new_balance = float(user['balance']) - amount
-            await context.bot.send_message(
-                chat_id=telegram_id,
-                text=TEXTS[lang]['approved_cashout'].format(amount, new_balance),
-                parse_mode='Markdown',
-                reply_markup=menu(lang)
-            )
+        lang = user_before.get('lang', 'en')
+        
+        # Notify the user
+        await context.bot.send_message(
+            chat_id=telegram_id,
+            text=TEXTS[lang]['approved_cashout'].format(amount, new_balance),
+            parse_mode='Markdown',
+            reply_markup=menu(lang)
+        )
         
         await update.message.reply_text(
-            f"✅ Cashout of {amount} Birr approved for withdrawal #{withdrawal_id}"
+            f"✅ Cashout approved for withdrawal #{withdrawal_id}\n"
+            f"👤 User: {telegram_id}\n"
+            f"💰 Amount: {amount} Birr\n"
+            f"📊 Balance: {old_balance} → {new_balance} Birr"
         )
-        logger.info(f"Cashout approved: {withdrawal_id} - {amount} Birr")
+        
+        logger.info(f"Cashout approved: withdrawal #{withdrawal_id} - {amount} Birr (balance: {old_balance} → {new_balance})")
         
     except ValueError:
         await update.message.reply_text("❌ Invalid WITHDRAWAL_ID format")
@@ -186,7 +223,7 @@ async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             
             await update.message.reply_text(f"✅ Cashout rejected for withdrawal #{withdrawal_id}")
-            logger.info(f"Cashout rejected: {withdrawal_id} - Reason: {reason}")
+            logger.info(f"Cashout rejected: withdrawal #{withdrawal_id} - Reason: {reason}")
         else:
             await update.message.reply_text(f"❌ Withdrawal #{withdrawal_id} not found")
         
