@@ -2,137 +2,225 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="description" content="Estif Bingo - Admin Control Panel">
-    <meta name="theme-color" content="#0f0c29">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estif Bingo - Admin Panel</title>
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico">
-    <link rel="apple-touch-icon" href="/assets/images/logo.png">
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    
-    <!-- CSS Assets -->
-    <link rel="stylesheet" href="/assets/css/admin.css">
-    <link rel="stylesheet" href="/assets/css/components.css">
-    
     <style>
-        /* Additional inline styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: 'Poppins', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
         }
         
-        /* Logo in top bar */
-        .logo-area {
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .admin-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+        }
+        
+        .top-bar {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 12px;
-        }
-        
-        .logo-area img {
-            height: 40px;
-            width: auto;
-            object-fit: contain;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
         }
         
         .top-bar h1 {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin: 0;
-            font-size: 1.6rem;
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #ffd700, #ff9800);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
         
-        .info-text {
+        .token-info {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 15px;
+            border-radius: 10px;
             font-size: 12px;
-            opacity: 0.7;
-            margin-top: 10px;
-            text-align: center;
+            font-family: monospace;
         }
         
-        /* Login logo */
-        .login-logo {
-            text-align: center;
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .tab-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .tab-btn.active {
+            background: #ff9800;
+            color: #1a1a2e;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
             margin-bottom: 20px;
         }
         
-        .login-logo img {
-            height: 80px;
-            width: auto;
-            object-fit: contain;
+        .stat-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        
+        select, input {
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+        
+        .players-list {
+            display: grid;
+            gap: 10px;
+        }
+        
+        .player-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 8px;
+        }
+        
+        .admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .admin-table th, .admin-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .admin-table th {
+            background: rgba(0, 0, 0, 0.5);
+            color: #ffd700;
         }
         
         @media (max-width: 768px) {
-            .logo-area img {
-                height: 30px;
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
             }
-            .top-bar h1 {
-                font-size: 1.2rem;
-            }
-            .login-logo img {
-                height: 60px;
+            .top-bar {
+                flex-direction: column;
+                gap: 10px;
             }
         }
         
-        /* Loading state */
-        .loading {
-            text-align: center;
-            padding: 20px;
-            color: #ffd966;
-        }
-        
-        /* Error message styling */
         .error-msg {
             color: #ff6b6b;
             text-align: center;
-            margin-top: 15px;
-            font-size: 14px;
-        }
-        
-        /* Success message */
-        .success-msg {
-            color: #4cd964;
-            text-align: center;
-            margin-top: 15px;
-            font-size: 14px;
+            padding: 20px;
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <!-- Login Section -->
-    <div id="loginSection" class="login-container">
-        <div class="login-logo">
-            <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
-        </div>
-        <h2>🔐 Admin Login</h2>
-        <input type="email" id="adminEmail" placeholder="Email" value="admin@estif.com">
-        <input type="password" id="adminPassword" placeholder="Password" value="admin123">
-        <button id="loginBtn">Login</button>
-        <div id="loginError" class="error-msg"></div>
-    </div>
-
-    <!-- Admin Panel (hidden until login) -->
     <div id="adminPanel" class="admin-panel">
         <div class="top-bar">
-            <h1>
-                <div class="logo-area">
-                    <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
-                    <span>🎲 Estif Bingo Admin</span>
-                </div>
-            </h1>
-            <button class="logout-btn" id="logoutBtn">Logout</button>
+            <h1>🎲 Estif Bingo Admin Panel</h1>
+            <div class="token-info">
+                🔑 Token: <span id="tokenDisplay"></span>
+            </div>
         </div>
 
         <div class="tabs">
             <button class="tab-btn active" data-tab="controls">🎮 Game Controls</button>
             <button class="tab-btn" data-tab="reports">📊 Reports</button>
             <button class="tab-btn" data-tab="players">👥 Online Players</button>
-            <button class="tab-btn" data-tab="sounds">🔊 Sound Settings</button>
         </div>
 
         <!-- Game Controls Tab -->
@@ -154,26 +242,25 @@
                     <option value="76">76%</option>
                     <option value="80">80%</option>
                 </select>
-                <button id="setWinPercentBtn" class="btn btn-primary">Set Win Percentage</button>
-                <button id="startGameBtn" class="btn btn-primary">🚀 Start Game (Force)</button>
-                <button id="endGameBtn" class="btn btn-danger">⏹️ End Round (No Winner)</button>
-                <button id="resetGameBtn" class="btn btn-warning">🔄 Reset Game (Round 1)</button>
+                <button id="setWinPercentBtn" class="btn-primary">Set Win Percentage</button>
+                <button id="startGameBtn" class="btn-primary">🚀 Start Game (Force)</button>
+                <button id="endGameBtn" class="btn-danger">⏹️ End Round (No Winner)</button>
+                <button id="resetGameBtn" class="btn-warning">🔄 Reset Game (Round 1)</button>
             </div>
             <div id="actionMessage" style="margin-top: 10px; color: #ffd700;"></div>
         </div>
 
         <!-- Reports Tab -->
         <div id="reportsTab" class="tab-content">
-            <div class="report-filters">
+            <div class="control-group">
                 <select id="reportType">
                     <option value="daily">📅 Daily</option>
                     <option value="weekly">📆 Weekly</option>
                     <option value="monthly">📆 Monthly</option>
-                    <option value="range">📊 Custom Range</option>
                     <option value="commission">💰 Commission Breakdown</option>
                 </select>
                 <div id="dynamicDateInputs"></div>
-                <button id="fetchReportBtn" class="btn btn-primary">Fetch Report</button>
+                <button id="fetchReportBtn" class="btn-primary">Fetch Report</button>
             </div>
             <div id="reportResult" style="overflow-x: auto;"></div>
         </div>
@@ -182,68 +269,57 @@
         <div id="playersTab" class="tab-content">
             <div id="playersListContainer" class="players-list"></div>
         </div>
-
-        <!-- Sound Settings Tab -->
-        <div id="soundsTab" class="tab-content">
-            <div class="control-group">
-                <label style="margin-right:10px">🎵 Select Sound Pack:</label>
-                <select id="soundPackSelect">
-                    <option value="pack1">🔊 Sound Pack 1 (Default)</option>
-                    <option value="pack2">🎵 Sound Pack 2</option>
-                    <option value="pack3">🎶 Sound Pack 3</option>
-                    <option value="pack4">🎼 Sound Pack 4</option>
-                </select>
-                <button id="applySoundPackBtn" class="btn btn-primary">Apply to Player Page</button>
-            </div>
-            <div class="info-text">
-                <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 16px; height: 16px; vertical-align: middle;" onerror="this.style.display='none'">
-                ⚠️ This setting is saved in your browser and affects the player page only. Each player can choose their own sound pack.
-            </div>
-        </div>
     </div>
 </div>
 
-<script src="/assets/js/utils.js"></script>
 <script>
-    // ---------- Helper functions ----------
-    let adminToken = localStorage.getItem('adminToken');
-    const API_BASE = ''; // relative to same origin
-    let loginAttempts = 0;
-    const MAX_LOGIN_ATTEMPTS = 5;
-
+    // Get token from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const ADMIN_TOKEN = urlParams.get('token');
+    
+    if (!ADMIN_TOKEN) {
+        document.body.innerHTML = `<div class="error-msg">
+            <h2>🔒 Access Denied</h2>
+            <p>Please use the admin link with token.</p>
+            <p>Example: /admin.html?token=estif-admin-2025-secret-key</p>
+        </div>`;
+        throw new Error('No token provided');
+    }
+    
+    // Display token (masked)
+    document.getElementById('tokenDisplay').textContent = ADMIN_TOKEN.substring(0, 10) + '...';
+    
+    let statsInterval, playersInterval;
+    
     async function apiCall(endpoint, method = 'GET', body = null) {
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${adminToken}`
+            'Authorization': `Bearer ${ADMIN_TOKEN}`
         };
         const options = { method, headers };
         if (body) options.body = JSON.stringify(body);
-        const res = await fetch(`${API_BASE}${endpoint}`, options);
+        
+        const res = await fetch(endpoint, options);
         if (res.status === 401) {
-            logout();
-            throw new Error('Session expired');
-        }
-        if (res.status === 429) {
-            throw new Error('Too many requests. Please wait a moment.');
+            alert('Session expired. Please refresh the page with the correct token.');
+            return null;
         }
         return res.json();
     }
-
+    
     function showMessage(msg, isError = false) {
         const msgDiv = document.getElementById('actionMessage');
         if (msgDiv) {
             msgDiv.innerText = msg;
             msgDiv.style.color = isError ? '#ff6b6b' : '#ffd700';
             setTimeout(() => { msgDiv.innerText = ''; }, 3000);
-        } else {
-            alert(msg);
         }
     }
-
+    
     async function refreshGameStats() {
         try {
             const data = await apiCall('/api/admin/stats');
-            if (data.success) {
+            if (data && data.success) {
                 document.getElementById('statStatus').innerText = data.status || '-';
                 document.getElementById('statRound').innerText = data.round || '-';
                 document.getElementById('statTimer').innerText = data.timer || '-';
@@ -252,7 +328,7 @@
                 document.getElementById('statCommission').innerText = (data.adminCommission || 0).toFixed(2);
                 document.getElementById('statPlayersCount').innerText = data.playersCount || 0;
                 document.getElementById('statWinPercent').innerText = `${data.winPercentage || 75}%`;
-                // sync dropdown
+                
                 const select = document.getElementById('winPercentSelect');
                 if (select && data.winPercentage) select.value = data.winPercentage;
             }
@@ -260,11 +336,11 @@
             console.error('Stats error:', err);
         }
     }
-
+    
     async function loadOnlinePlayers() {
         try {
             const data = await apiCall('/api/admin/players');
-            if (data.success && data.players) {
+            if (data && data.success && data.players) {
                 const container = document.getElementById('playersListContainer');
                 container.innerHTML = '';
                 if (data.players.length === 0) {
@@ -277,15 +353,12 @@
                         container.appendChild(card);
                     });
                 }
-            } else {
-                document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Failed to load players</div>';
             }
         } catch (err) {
             console.error(err);
-            document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Error loading players</div>';
         }
     }
-
+    
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
@@ -295,134 +368,126 @@
             return m;
         });
     }
-
+    
     async function setWinPercentage() {
         const percentage = parseInt(document.getElementById('winPercentSelect').value);
         try {
             const res = await apiCall('/api/admin/win-percentage', 'POST', { percentage });
-            if (res.success) {
+            if (res && res.success) {
                 showMessage(`Win percentage set to ${percentage}%`);
                 refreshGameStats();
             } else {
-                showMessage(res.message || 'Failed', true);
+                showMessage(res?.message || 'Failed', true);
             }
         } catch (err) {
             showMessage('Error setting win percentage', true);
         }
     }
-
+    
     async function startGame() {
         try {
             const res = await apiCall('/api/admin/start-game', 'POST');
-            if (res.success) {
+            if (res && res.success) {
                 showMessage('Game started forcefully!');
                 refreshGameStats();
             } else {
-                showMessage(res.message || 'Cannot start game', true);
+                showMessage(res?.message || 'Cannot start game', true);
             }
         } catch (err) {
             showMessage('Error starting game', true);
         }
     }
-
+    
     async function endGame() {
         if (confirm('End current round with no winner? This will skip to next round.')) {
             try {
                 const res = await apiCall('/api/admin/end-game', 'POST');
-                if (res.success) {
+                if (res && res.success) {
                     showMessage('Round ended');
                     refreshGameStats();
                 } else {
-                    showMessage(res.message || 'Cannot end game', true);
+                    showMessage(res?.message || 'Cannot end game', true);
                 }
             } catch (err) {
                 showMessage('Error ending game', true);
             }
         }
     }
-
+    
     async function resetGame() {
-        if (confirm('⚠️ RESET GAME to round 1? All current cartela selections will be lost. Players remain. Proceed?')) {
+        if (confirm('⚠️ RESET GAME to round 1? All current cartela selections will be lost. Proceed?')) {
             try {
                 const res = await apiCall('/api/admin/reset-game', 'POST');
-                if (res.success) {
+                if (res && res.success) {
                     showMessage('Game reset to round 1');
                     refreshGameStats();
                 } else {
-                    showMessage(res.message || 'Reset failed', true);
+                    showMessage(res?.message || 'Reset failed', true);
                 }
             } catch (err) {
                 showMessage('Error resetting game', true);
             }
         }
     }
-
-    // Report handling
+    
     function updateDateInputs() {
         const type = document.getElementById('reportType').value;
         const container = document.getElementById('dynamicDateInputs');
         container.innerHTML = '';
+        
         if (type === 'daily') {
-            container.innerHTML = '<input type="date" id="reportDate" class="form-input" value="' + new Date().toISOString().slice(0,10) + '">';
+            container.innerHTML = '<input type="date" id="reportDate" value="' + new Date().toISOString().slice(0,10) + '">';
         } else if (type === 'weekly') {
             const now = new Date();
-            const year = now.getFullYear();
             const week = getWeekNumber(now);
             container.innerHTML = `
-                <input type="number" id="weekYear" class="form-input" placeholder="Year" value="${year}" style="width:100px">
-                <input type="number" id="weekNum" class="form-input" placeholder="Week" value="${week}" style="width:100px">
+                <input type="number" id="weekYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
+                <input type="number" id="weekNum" placeholder="Week" value="${week}" style="width:100px">
             `;
         } else if (type === 'monthly') {
             const now = new Date();
             container.innerHTML = `
-                <input type="number" id="monthYear" class="form-input" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
-                <select id="monthNum" class="form-select">
+                <input type="number" id="monthYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
+                <select id="monthNum">
                     ${[...Array(12)].map((_, i) => `<option value="${i+1}" ${i+1 === now.getMonth()+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('default', {month:'long'})}</option>`).join('')}
                 </select>
-            `;
-        } else if (type === 'range') {
-            container.innerHTML = `
-                <input type="date" id="startDate" class="form-input" placeholder="Start Date">
-                <input type="date" id="endDate" class="form-input" placeholder="End Date">
             `;
         } else if (type === 'commission') {
             // no extra inputs
         }
     }
-
+    
     function getWeekNumber(d) {
         d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
         d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
         const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
         return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
     }
-
+    
     async function fetchReport() {
         const type = document.getElementById('reportType').value;
         let url = '';
+        
         if (type === 'daily') {
             const date = document.getElementById('reportDate').value;
             if (!date) return showMessage('Select date', true);
-            url = `/api/reports/daily?date=${date}`;
+            url = `/api/reports/daily?date=${date}&token=${ADMIN_TOKEN}`;
         } else if (type === 'weekly') {
             const year = document.getElementById('weekYear').value;
             const week = document.getElementById('weekNum').value;
             if (!year || !week) return showMessage('Enter year and week', true);
-            url = `/api/reports/weekly?year=${year}&week=${week}`;
+            url = `/api/reports/weekly?year=${year}&week=${week}&token=${ADMIN_TOKEN}`;
         } else if (type === 'monthly') {
             const year = document.getElementById('monthYear').value;
             const month = document.getElementById('monthNum').value;
-            url = `/api/reports/monthly?year=${year}&month=${month}`;
-        } else if (type === 'range') {
-            const start = document.getElementById('startDate').value;
-            const end = document.getElementById('endDate').value;
-            if (!start || !end) return showMessage('Select start and end dates', true);
-            url = `/api/reports/range?startDate=${start}&endDate=${end}`;
+            url = `/api/reports/monthly?year=${year}&month=${month}&token=${ADMIN_TOKEN}`;
         } else if (type === 'commission') {
-            url = `/api/reports/commission`;
+            url = `/api/reports/commission?token=${ADMIN_TOKEN}`;
         }
+        
         try {
-            const data = await apiCall(url);
+            const res = await fetch(url);
+            const data = await res.json();
             if (data.success) {
                 displayReport(data, type);
             } else {
@@ -432,7 +497,7 @@
             showMessage('Failed to fetch report', true);
         }
     }
-
+    
     function displayReport(data, type) {
         const container = document.getElementById('reportResult');
         if (type === 'commission') {
@@ -451,112 +516,17 @@
             container.innerHTML = html;
         } else {
             const report = data.report;
-            let html = `<h3>📊 Report: ${report.date || report.startDate || 'Custom Range'}</h3>`;
-            html += `<div class="stats-grid" style="margin-bottom: 20px;">
+            let html = `<h3>📊 Report: ${report.date || 'Custom Range'}</h3>`;
+            html += `<div class="stats-grid">
                         <div class="stat-card"><div class="stat-label">Total Games</div><div class="stat-value">${report.totalGames}</div></div>
                         <div class="stat-card"><div class="stat-label">Total Bet</div><div class="stat-value">${report.totalBet} ETB</div></div>
                         <div class="stat-card"><div class="stat-label">Total Won</div><div class="stat-value">${report.totalWon} ETB</div></div>
                         <div class="stat-card"><div class="stat-label">Total Commission</div><div class="stat-value">${report.totalCommission} ETB</div></div>
                     </div>`;
-            if (report.rounds && report.rounds.length) {
-                html += '<table class="admin-table"><thead><tr><th>Round ID</th><th>Round #</th><th>Total Cartelas</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Winners</th><th>Time</th></tr></thead><tbody>';
-                report.rounds.forEach(r => {
-                    let winners = r.winners ? (Array.isArray(r.winners) ? r.winners.join(', ') : '-') : '-';
-                    html += `<tr>
-                        <td>${r.round_id}</td>
-                        <td>${r.round_number}</td>
-                        <td>${r.total_cartelas}</td>
-                        <td>${r.total_pool}</td>
-                        <td>${r.winner_reward}</td>
-                        <td>${r.admin_commission}</td>
-                        <td>${winners}</td>
-                        <td>${new Date(r.timestamp).toLocaleString()}</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-            } else {
-                html += '<p>No rounds found.</p>';
-            }
             container.innerHTML = html;
         }
     }
-
-    // Sound pack selection (stored in localStorage, affects player page)
-    function loadSoundPackSelection() {
-        const saved = localStorage.getItem('soundPack');
-        if (saved) {
-            document.getElementById('soundPackSelect').value = saved;
-        }
-    }
     
-    function applySoundPack() {
-        const pack = document.getElementById('soundPackSelect').value;
-        localStorage.setItem('soundPack', pack);
-        showMessage(`✅ Sound pack set to ${pack}. It will be used on the player page.`);
-    }
-
-    // Login / Logout
-    function logout() {
-        localStorage.removeItem('adminToken');
-        adminToken = null;
-        document.getElementById('loginSection').style.display = 'block';
-        document.getElementById('adminPanel').style.display = 'none';
-        if (window.statsInterval) clearInterval(window.statsInterval);
-        if (window.playersInterval) clearInterval(window.playersInterval);
-        loginAttempts = 0;
-        document.getElementById('loginError').innerText = '';
-    }
-
-    async function login() {
-        const email = document.getElementById('adminEmail').value;
-        const password = document.getElementById('adminPassword').value;
-        const errorDiv = document.getElementById('loginError');
-        
-        // Clear previous error
-        errorDiv.innerText = '';
-        
-        // Check login attempts
-        if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-            errorDiv.innerText = 'Too many failed attempts. Please wait 10 minutes.';
-            return;
-        }
-        
-        try {
-            const res = await fetch('/api/admin/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
-            });
-            
-            if (res.status === 429) {
-                errorDiv.innerText = 'Too many requests. Please wait a moment.';
-                return;
-            }
-            
-            const data = await res.json();
-            if (data.success && data.token) {
-                adminToken = data.token;
-                localStorage.setItem('adminToken', adminToken);
-                document.getElementById('loginSection').style.display = 'none';
-                document.getElementById('adminPanel').style.display = 'block';
-                refreshGameStats();
-                loadOnlinePlayers();
-                if (window.statsInterval) clearInterval(window.statsInterval);
-                window.statsInterval = setInterval(refreshGameStats, 5000);
-                if (window.playersInterval) clearInterval(window.playersInterval);
-                window.playersInterval = setInterval(loadOnlinePlayers, 10000);
-                loadSoundPackSelection();
-                loginAttempts = 0;
-            } else {
-                loginAttempts++;
-                errorDiv.innerText = `Invalid credentials (${loginAttempts}/${MAX_LOGIN_ATTEMPTS})`;
-            }
-        } catch (err) {
-            errorDiv.innerText = 'Login failed. Please try again.';
-        }
-    }
-
-    // Tab switching
     function initTabs() {
         const btns = document.querySelectorAll('.tab-btn');
         btns.forEach(btn => {
@@ -571,43 +541,21 @@
             });
         });
     }
-
-    // On page load
-    window.onload = () => {
-        if (adminToken) {
-            fetch('/api/admin/stats', {
-                headers: { 'Authorization': `Bearer ${adminToken}` }
-            }).then(res => {
-                if (res.status === 401) {
-                    logout();
-                } else {
-                    document.getElementById('loginSection').style.display = 'none';
-                    document.getElementById('adminPanel').style.display = 'block';
-                    refreshGameStats();
-                    loadOnlinePlayers();
-                    window.statsInterval = setInterval(refreshGameStats, 5000);
-                    window.playersInterval = setInterval(loadOnlinePlayers, 10000);
-                    loadSoundPackSelection();
-                }
-            }).catch(() => logout());
-        } else {
-            document.getElementById('loginSection').style.display = 'block';
-            document.getElementById('adminPanel').style.display = 'none';
-        }
-
-        document.getElementById('loginBtn').addEventListener('click', login);
-        document.getElementById('logoutBtn').addEventListener('click', logout);
-        document.getElementById('setWinPercentBtn').addEventListener('click', setWinPercentage);
-        document.getElementById('startGameBtn').addEventListener('click', startGame);
-        document.getElementById('endGameBtn').addEventListener('click', endGame);
-        document.getElementById('resetGameBtn').addEventListener('click', resetGame);
-        document.getElementById('reportType').addEventListener('change', updateDateInputs);
-        document.getElementById('fetchReportBtn').addEventListener('click', fetchReport);
-        document.getElementById('applySoundPackBtn').addEventListener('click', applySoundPack);
-        initTabs();
-        updateDateInputs();
-        loadSoundPackSelection();
-    };
+    
+    // Initialize
+    refreshGameStats();
+    loadOnlinePlayers();
+    statsInterval = setInterval(refreshGameStats, 5000);
+    playersInterval = setInterval(loadOnlinePlayers, 10000);
+    
+    document.getElementById('setWinPercentBtn').addEventListener('click', setWinPercentage);
+    document.getElementById('startGameBtn').addEventListener('click', startGame);
+    document.getElementById('endGameBtn').addEventListener('click', endGame);
+    document.getElementById('resetGameBtn').addEventListener('click', resetGame);
+    document.getElementById('reportType').addEventListener('change', updateDateInputs);
+    document.getElementById('fetchReportBtn').addEventListener('click', fetchReport);
+    initTabs();
+    updateDateInputs();
 </script>
 </body>
 </html>
