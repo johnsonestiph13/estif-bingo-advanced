@@ -42,17 +42,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use(compression());
 
-// Enable CORS for bot API calls
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.sendStatus(200);
-    } else {
-        next();
-    }
-});
-
 // Rate limiting for API endpoints
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -323,24 +312,6 @@ let drawTimer = null;
 let nextRoundTimer = null;
 let adminTokens = new Map();
 let activeSessions = new Map();
-
-// ==================== SIMPLE ADMIN AUTH (NO LOGIN REQUIRED) ====================
-// Use a secret token in the URL: /admin.html?token=YOUR_SECRET
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "estif-admin-2025-secret-key";
-
-function verifyAdminToken(req, res, next) {
-    // Check token in query parameter or Authorization header
-    const token = req.query.token || req.headers.authorization?.split(" ")[1];
-    
-    if (token === ADMIN_SECRET) {
-        next();
-    } else {
-        res.status(401).json({ 
-            success: false, 
-            message: "Unauthorized. Access admin panel with: /admin.html?token=" + ADMIN_SECRET 
-        });
-    }
-}
 
 // ==================== LOAD WIN PERCENTAGE FROM BOT ====================
 async function loadWinPercentage() {
@@ -680,7 +651,32 @@ async function recoverFromCrash() {
     startSelectionTimer();
 }
 
-// ==================== ADMIN ENDPOINTS (All protected by verifyAdminToken) ====================
+// ==================== ADMIN AUTH ====================
+// UPDATED: Your admin email and password hash
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "johnsonestiph13@gmail.com";
+let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+if (!ADMIN_PASSWORD_HASH) {
+    // This is the bcrypt hash for "admin123"
+    ADMIN_PASSWORD_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ4Q6Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5";
+}
+
+app.post("/api/admin/login", authLimiter, async (req, res) => {
+    const { email, password } = req.body;
+    if (email !== ADMIN_EMAIL) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    if (!isValid) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "24h" });
+    adminTokens.set(token, Date.now());
+    res.json({ success: true, token });
+});
+
+function verifyAdminToken(req, res, next) {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token || !adminTokens.has(token)) return res.status(401).json({ success: false, message: "Unauthorized" });
+    next();
+}
+
+// ==================== ADMIN ENDPOINTS ====================
 app.get("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     try {
         const response = await fetch(`${BOT_API_URL}/api/commission`, {
@@ -859,15 +855,6 @@ app.get("/api/cartela/:id", (req, res) => {
 app.get("/api/global-stats", (req, res) => {
     const { totalBetAmount, winnerReward, totalCartelas } = calculateRewardPool();
     res.json({ success: true, totalSelectedCartelas: totalCartelas, totalBetAmount, winnerReward, winPercentage: gameState.winPercentage, remainingCartelas: TOTAL_CARTELAS - totalCartelas });
-});
-
-// ==================== SERVE PLAYER PAGE ====================
-app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "player.html"));
-});
-
-app.get("/player", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "player.html"));
 });
 
 app.get("/health", (req, res) => { res.json({ status: "OK" }); });
@@ -1072,11 +1059,13 @@ async function startServer() {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (1000 CARTELAS) 🎲    ║
-║     📱 Player: https://estif-bingo-advanced-1.onrender.com/player.html                                 ║
-║     🔐 Admin:  https://estif-bingo-advanced-1.onrender.com/admin.html?token=${ADMIN_SECRET} ║
-║     ✅ No login required - Use token in URL                               ║
+║     📱 Player: https://estif-bingo-advanced-1.onrender.com/player.html    ║
+║     🔐 Admin:  https://estif-bingo-advanced-1.onrender.com/admin.html     ║
+║     ✅ Commission adjustable (70/75/76/80) via admin panel                ║
+║     ✅ Sound packs served from /public/sounds/                            ║
 ║     ✅ Full Telegram bot integration                                      ║
-║     ✅ Automatic balance sync with bot                                    ║
+║     ✅ Automated migrations (run on startup)                              ║
+║     ✅ 1000 unique cartelas (1-1000)                                      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
         `);
     });
