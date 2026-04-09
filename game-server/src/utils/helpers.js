@@ -2,6 +2,17 @@
 
 const crypto = require("crypto");
 
+// ==================== BINGO CONSTANTS ====================
+
+const BINGO_LETTERS = ['B', 'I', 'N', 'G', 'O'];
+const BINGO_RANGES = {
+    'B': { min: 1, max: 15 },
+    'I': { min: 16, max: 30 },
+    'N': { min: 31, max: 45 },
+    'G': { min: 46, max: 60 },
+    'O': { min: 61, max: 75 }
+};
+
 // ==================== TIME FORMATTING ====================
 
 /**
@@ -41,6 +52,14 @@ function formatDate(date = new Date()) {
     return date.toISOString().replace("T", " ").substring(0, 19);
 }
 
+/**
+ * Get current timestamp in seconds
+ * @returns {number} - Unix timestamp in seconds
+ */
+function getTimestamp() {
+    return Math.floor(Date.now() / 1000);
+}
+
 // ==================== RANDOM GENERATION ====================
 
 /**
@@ -71,6 +90,14 @@ function generateOTP() {
 }
 
 /**
+ * Generate random auth code for game link
+ * @returns {string} - Random auth code
+ */
+function generateAuthCode() {
+    return crypto.randomBytes(24).toString('hex');
+}
+
+/**
  * Shuffle array (Fisher-Yates)
  * @param {Array} array - Array to shuffle
  * @returns {Array} - Shuffled array (new array)
@@ -84,15 +111,85 @@ function shuffleArray(array) {
     return shuffled;
 }
 
+// ==================== BINGO HELPERS ====================
+
+/**
+ * Get BINGO letter for a number (1-75)
+ * @param {number} number - Number from 1-75
+ * @returns {string} - B, I, N, G, or O
+ */
+function getBingoLetter(number) {
+    if (number <= 15) return 'B';
+    if (number <= 30) return 'I';
+    if (number <= 45) return 'N';
+    if (number <= 60) return 'G';
+    return 'O';
+}
+
+/**
+ * Get BINGO letter for a cartela ID
+ * @param {string} cartelaId - Cartela ID like "B1_001"
+ * @returns {string|null} - B, I, N, G, O or null
+ */
+function getBingoLetterFromCartelaId(cartelaId) {
+    const match = cartelaId?.match(/^([BINGO])/);
+    return match ? match[1] : null;
+}
+
+/**
+ * Parse cartela ID into components
+ * @param {string} cartelaId - Cartela ID like "B1_001" or "O15_188"
+ * @returns {object|null} - { letter, number, variation, fullId }
+ */
+function parseCartelaId(cartelaId) {
+    if (!cartelaId || typeof cartelaId !== "string") return null;
+    
+    const match = cartelaId.match(/^([BINGO])(\d+)_(\d{3})$/);
+    if (!match) return null;
+    
+    return {
+        letter: match[1],
+        number: parseInt(match[2], 10),
+        variation: parseInt(match[3], 10),
+        fullId: cartelaId
+    };
+}
+
+/**
+ * Generate a cartela ID
+ * @param {string} letter - B, I, N, G, O
+ * @param {number} number - Number within letter range (1-15 for B, etc.)
+ * @param {number} variation - Variation number (1-200)
+ * @returns {string} - Cartela ID like "B1_001"
+ */
+function generateCartelaId(letter, number, variation) {
+    return `${letter}${number}_${variation.toString().padStart(3, '0')}`;
+}
+
+/**
+ * Validate cartela ID format
+ * @param {string} cartelaId - Cartela ID to validate
+ * @returns {boolean}
+ */
+function isValidCartelaIdFormat(cartelaId) {
+    const parsed = parseCartelaId(cartelaId);
+    if (!parsed) return false;
+    
+    const range = BINGO_RANGES[parsed.letter];
+    if (!range) return false;
+    
+    return parsed.number >= range.min && parsed.number <= range.max;
+}
+
 // ==================== VALIDATION ====================
 
 /**
- * Validate phone number format
+ * Validate phone number format (Ethiopian format)
  * @param {string} phone - Phone number
  * @returns {boolean} - Whether valid
  */
 function isValidPhone(phone) {
-    const phoneRegex = /^[0-9+\-\s()]{8,15}$/;
+    const phoneRegex = /^(09|07)[0-9]{8}$/;
     return phoneRegex.test(phone);
 }
 
@@ -114,16 +211,21 @@ function isValidEmail(email) {
  */
 function isValidAmount(amount, max = 1000000) {
     const num = parseFloat(amount);
-    return !isNaN(num) && num > 0 && num <= max;
+    return !isNaN(num) && num > 0 && num <= max && Number.isFinite(num);
 }
 
 /**
- * Validate cartela number
- * @param {number} cartelaId - Cartela ID
- * @param {number} totalCartelas - Total available cartelas (default: 400)
+ * Validate cartela ID (supports string IDs like "B1_001")
+ * @param {string|number} cartelaId - Cartela ID
+ * @param {number} totalCartelas - Total available cartelas (for numeric IDs)
  * @returns {boolean} - Whether valid
  */
-function isValidCartelaId(cartelaId, totalCartelas = 400) {
+function isValidCartelaId(cartelaId, totalCartelas = 1000) {
+    // Handle string IDs like "B1_001"
+    if (typeof cartelaId === 'string') {
+        return isValidCartelaIdFormat(cartelaId);
+    }
+    // Handle numeric IDs (backward compatibility)
     const id = parseInt(cartelaId);
     return !isNaN(id) && id >= 1 && id <= totalCartelas;
 }
@@ -135,6 +237,27 @@ function isValidCartelaId(cartelaId, totalCartelas = 400) {
  */
 function isValidWinPercentage(percentage) {
     return [70, 75, 76, 80].includes(percentage);
+}
+
+/**
+ * Validate username (alphanumeric, 3-20 chars)
+ * @param {string} username - Username to validate
+ * @returns {boolean}
+ */
+function isValidUsername(username) {
+    if (!username || typeof username !== "string") return false;
+    const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
+    return usernameRegex.test(username);
+}
+
+/**
+ * Validate round number
+ * @param {number} round - Round number
+ * @returns {boolean}
+ */
+function isValidRound(round) {
+    const num = parseInt(round);
+    return !isNaN(num) && num >= 1 && num <= 999999;
 }
 
 // ==================== SAFE PARSING ====================
@@ -256,6 +379,15 @@ function uniqueArray(array) {
     return [...new Set(array)];
 }
 
+/**
+ * Get random element from array
+ * @param {Array} array - Source array
+ * @returns {any} - Random element
+ */
+function randomElement(array) {
+    return array[Math.floor(Math.random() * array.length)];
+}
+
 // ==================== PROMISE HELPERS ====================
 
 /**
@@ -307,6 +439,20 @@ function timeout(promise, timeoutMs) {
     ]);
 }
 
+/**
+ * Promise with timeout and retry
+ * @param {Function} fn - Async function
+ * @param {object} options - Options { timeoutMs, retries, delay }
+ * @returns {Promise<any>}
+ */
+async function withTimeoutAndRetry(fn, options = {}) {
+    const { timeoutMs = 5000, retries = 3, delay = 1000 } = options;
+    
+    return retry(async () => {
+        return timeout(fn(), timeoutMs);
+    }, retries, delay);
+}
+
 // ==================== SECURITY HELPERS ====================
 
 /**
@@ -322,7 +468,9 @@ function sanitizeInput(input) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#x27;")
-        .replace(/\//g, "&#x2F;");
+        .replace(/\//g, "&#x2F;")
+        .replace(/`/g, "&#x60;")
+        .replace(/=/g, "&#x3D;");
 }
 
 /**
@@ -336,19 +484,72 @@ function truncate(str, maxLength = 100) {
     return str.substring(0, maxLength - 3) + "...";
 }
 
+/**
+ * Escape regex special characters
+ * @param {string} str - Input string
+ * @returns {string} - Escaped string
+ */
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ==================== NUMBER HELPERS ====================
+
+/**
+ * Format number with commas
+ * @param {number} num - Number to format
+ * @returns {string} - Formatted number
+ */
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Format currency (ETB)
+ * @param {number} amount - Amount to format
+ * @returns {string} - Formatted currency
+ */
+function formatCurrency(amount) {
+    return `${amount.toFixed(2)} ETB`;
+}
+
+/**
+ * Clamp number between min and max
+ * @param {number} value - Value to clamp
+ * @param {number} min - Minimum value
+ * @param {number} max - Maximum value
+ * @returns {number}
+ */
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
 // ==================== EXPORTS ====================
 
 module.exports = {
+    // BINGO constants
+    BINGO_LETTERS,
+    BINGO_RANGES,
+    
     // Time formatting
     formatTime,
     formatDuration,
     formatDate,
+    getTimestamp,
     
     // Random generation
     randomInt,
     randomString,
     generateOTP,
+    generateAuthCode,
     shuffleArray,
+    
+    // BINGO helpers
+    getBingoLetter,
+    getBingoLetterFromCartelaId,
+    parseCartelaId,
+    generateCartelaId,
+    isValidCartelaIdFormat,
     
     // Validation
     isValidPhone,
@@ -356,6 +557,8 @@ module.exports = {
     isValidAmount,
     isValidCartelaId,
     isValidWinPercentage,
+    isValidUsername,
+    isValidRound,
     
     // Safe parsing
     safeJSONParse,
@@ -371,13 +574,21 @@ module.exports = {
     // Array helpers
     chunkArray,
     uniqueArray,
+    randomElement,
     
     // Promise helpers
     sleep,
     retry,
     timeout,
+    withTimeoutAndRetry,
     
     // Security helpers
     sanitizeInput,
-    truncate
+    truncate,
+    escapeRegex,
+    
+    // Number helpers
+    formatNumber,
+    formatCurrency,
+    clamp
 };

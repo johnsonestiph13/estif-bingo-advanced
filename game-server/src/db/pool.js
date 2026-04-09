@@ -42,7 +42,7 @@ async function initGameDatabase() {
             )
         `);
 
-        // Game transactions log (for auditing)
+        // Game transactions log (for auditing) - UPDATED: cartela as VARCHAR
         await client.query(`
             CREATE TABLE IF NOT EXISTS game_transactions (
                 id SERIAL PRIMARY KEY,
@@ -50,18 +50,18 @@ async function initGameDatabase() {
                 username VARCHAR(50),
                 type VARCHAR(20) NOT NULL,
                 amount DECIMAL(10,2) NOT NULL,
-                cartela INTEGER,
+                cartela VARCHAR(20),
                 round INTEGER,
                 note TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
-        // Active round selections (for crash recovery)
+        // Active round selections (for crash recovery) - UPDATED: cartela_number as VARCHAR
         await client.query(`
             CREATE TABLE IF NOT EXISTS active_round_selections (
                 round_number INTEGER NOT NULL,
-                cartela_number INTEGER NOT NULL,
+                cartela_number VARCHAR(20) NOT NULL,
                 telegram_id BIGINT NOT NULL,
                 selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (round_number, cartela_number)
@@ -92,6 +92,11 @@ async function initGameDatabase() {
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp 
             ON game_transactions(timestamp DESC)
+        `);
+        
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_active_round_selections_cartela 
+            ON active_round_selections(cartela_number)
         `);
 
         console.log("✅ Game database tables ready");

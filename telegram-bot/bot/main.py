@@ -1,4 +1,4 @@
-# main.py - WORKING VERSION FOR RENDER
+# main.py - UPDATED VERSION WITH GAME API BLUEPRINT
 
 import asyncio
 import logging
@@ -19,6 +19,12 @@ def run_flask():
     """Run Flask in a separate thread"""
     from .api import create_flask_app
     app = create_flask_app()
+    
+    # Register game API blueprint
+    from .api.game_api import game_api_bp
+    app.register_blueprint(game_api_bp)
+    logger.info("✅ Game API blueprint registered")
+    
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
 
@@ -61,7 +67,7 @@ def run_bot():
     # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("balance", balance))
     application.add_handler(CommandHandler("bingo", bingo_otp))
@@ -70,9 +76,11 @@ def run_bot():
     application.add_handler(CommandHandler("approve_cashout", approve_cashout))
     application.add_handler(CommandHandler("reject_cashout", reject_cashout))
     
+    # Add message handlers
     application.add_handler(MessageHandler(filters.PHOTO, handle_deposit_screenshot))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     
+    # Add menu button handlers
     application.add_handler(MessageHandler(filters.Regex("🎮 Play|🎮 ጨዋታ"), play))
     application.add_handler(MessageHandler(filters.Regex("📝 Register|📝 ተመዝገብ"), register))
     application.add_handler(MessageHandler(filters.Regex("💰 Deposit|💰 ገንዘብ አስገባ"), deposit))
@@ -81,8 +89,10 @@ def run_bot():
     application.add_handler(MessageHandler(filters.Regex("🎉 Invite|🎉 ጋብዝ"), invite))
     application.add_handler(MessageHandler(filters.Regex("🔐 Bingo Code|🔐 የቢንጎ ኮድ"), bingo_otp))
     
+    # Add text handler for unhandled messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
     
+    # Add callback query handlers
     application.add_handler(CallbackQueryHandler(language_callback, pattern="lang_"))
     application.add_handler(CallbackQueryHandler(deposit_callback, pattern="dep_"))
     application.add_handler(CallbackQueryHandler(cashout_callback, pattern="cash_"))
@@ -104,7 +114,8 @@ def main():
     # Start Flask in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info(f"Flask API on port {FLASK_PORT}")
+    logger.info(f"🚀 Flask API running on port {FLASK_PORT}")
+    logger.info(f"📡 Game API endpoints available at: /api/commission, /api/deduct, /api/add, etc.")
     
     # Run bot in main thread (this blocks)
     run_bot()

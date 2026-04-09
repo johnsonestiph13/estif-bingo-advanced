@@ -6,8 +6,9 @@ const { config } = require("../config");
 
 // ==================== CARTELA DATA CACHE ====================
 
-let cartelaData = {};
-const CARTELA_DATA_FILE = config.CARTELA_DATA_FILE;
+let cartelasData = {};
+let cartelaMetadata = new Map();
+const CARTELA_DATA_FILE = config.CARTELA_DATA_FILE || path.join(__dirname, "../../data/cartelas.json");
 
 // Ensure data directory exists
 const dataDir = path.dirname(CARTELA_DATA_FILE);
@@ -15,23 +16,42 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// Load existing cartela data if available
-try {
-    if (fs.existsSync(CARTELA_DATA_FILE)) {
-        cartelaData = JSON.parse(fs.readFileSync(CARTELA_DATA_FILE, "utf8"));
-        console.log(`✅ Loaded ${Object.keys(cartelaData).length} cartelas from cache`);
+// Load cartelas from JSON file
+function loadCartelasFromFile() {
+    try {
+        if (fs.existsSync(CARTELA_DATA_FILE)) {
+            const rawData = fs.readFileSync(CARTELA_DATA_FILE, "utf8");
+            cartelasData = JSON.parse(rawData);
+            
+            // Build metadata map for quick lookups
+            for (const [id, data] of Object.entries(cartelasData)) {
+                cartelaMetadata.set(id, {
+                    id: id,
+                    letter: id.charAt(0),
+                    number: parseInt(id.match(/\d+/)?.[0] || 0),
+                    variation: parseInt(id.split('_')[1]) || 0
+                });
+            }
+            
+            console.log(`✅ Loaded ${Object.keys(cartelasData).length} cartelas from ${CARTELA_DATA_FILE}`);
+            return true;
+        } else {
+            console.warn(`⚠️ Cartela file not found at: ${CARTELA_DATA_FILE}`);
+            return false;
+        }
+    } catch (err) {
+        console.error("❌ Error loading cartelas:", err.message);
+        return false;
     }
-} catch (err) {
-    console.log("⚠️ No cartela cache file found, will generate on demand");
 }
 
-// ==================== BINGO CARD GENERATION ====================
+// Load on module initialization
+loadCartelasFromFile();
+
+// ==================== BINGO CARD GENERATION (Fallback) ====================
 
 /**
- * Generate a random Bingo card (5x5 grid)
- * Follows standard Bingo rules:
- * - B: 1-15, I: 16-30, N: 31-45, G: 46-60, O: 61-75
- * - Center cell is "FREE"
+ * Generate a random Bingo card (5x5 grid) - used as fallback
  */
 function generateRandomBingoCard() {
     const getRandomNumbers = (min, max, count) => {
@@ -53,8 +73,8 @@ function generateRandomBingoCard() {
     const g = getRandomNumbers(46, 60, 5);
     const o = getRandomNumbers(61, 75, 5);
     
-    // Set center as FREE
-    n[2] = "FREE";
+    // Set center as FREE (0 in your JSON format)
+    n[2] = 0;
     
     return [
         [b[0], i[0], n[0], g[0], o[0]],
@@ -68,46 +88,55 @@ function generateRandomBingoCard() {
 // ==================== CARTELA GRID RETRIEVAL ====================
 
 /**
- * Get cartela grid by ID (generates if not exists)
+ * Get cartela grid by ID (e.g., "B1_001", "O15_188")
  */
 function getCartelaGrid(cartelaId) {
-    if (cartelaData[cartelaId]) {
-        return cartelaData[cartelaId].grid;
+    // First, try exact match
+    if (cartelasData[cartelaId]) {
+        return cartelasData[cartelaId].grid;
     }
     
-    const grid = generateRandomBingoCard();
-    cartelaData[cartelaId] = {
-        id: cartelaId,
-        grid: grid,
-        generatedAt: new Date().toISOString()
-    };
+    // Try to find by prefix (e.g., "B1" instead of "B1_001")
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey) {
+        return cartelasData[matchingKey].grid;
+    }
     
-    saveCartelaData();
-    return grid;
+    // Fallback: generate random grid
+    console.warn(`Cartela ${cartelaId} not found, generating random grid`);
+    return generateRandomBingoCard();
 }
 
 /**
- * Save cartela data to JSON file (for persistence across restarts)
+ * Get full cartela data object
  */
-function saveCartelaData() {
-    try {
-        fs.writeFileSync(CARTELA_DATA_FILE, JSON.stringify(cartelaData, null, 2));
-        console.log(`💾 Saved ${Object.keys(cartelaData).length} cartelas to cache`);
-    } catch (err) {
-        console.error("❌ Failed to save cartela data:", err);
+function getCartela(cartelaId) {
+    if (cartelasData[cartelaId]) {
+        return cartelasData[cartelaId];
     }
+    
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey) {
+        return cartelasData[matchingKey];
+    }
+    
+    return null;
 }
 
 /**
  * Get cartela metadata (without full grid)
  */
-function getCartelaMetadata(cartelaId) {
-    if (cartelaData[cartelaId]) {
-        return {
-            id: cartelaId,
-            generatedAt: cartelaData[cartelaId].generatedAt
-        };
+function getCartelaMetadataById(cartelaId) {
+    if (cartelaMetadata.has(cartelaId)) {
+        return cartelaMetadata.get(cartelaId);
     }
+    
+    // Try prefix match
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey && cartelaMetadata.has(matchingKey)) {
+        return cartelaMetadata.get(matchingKey);
+    }
+    
     return null;
 }
 
@@ -121,8 +150,10 @@ function checkBingoWin(cartelaId, drawnNumbers) {
     const grid = getCartelaGrid(cartelaId);
     if (!grid) return { won: false, winningLines: [] };
     
+    // Convert drawn numbers to Set for O(1) lookup
+    // Also add 0 for FREE space (matching your JSON format)
     const drawnSet = new Set(drawnNumbers);
-    drawnSet.add("FREE"); // FREE space is always considered marked
+    drawnSet.add(0); // FREE space is represented as 0
     
     const winningLines = [];
     
@@ -167,7 +198,8 @@ function checkBingoWin(cartelaId, drawnNumbers) {
     
     return {
         won: winningLines.length > 0,
-        winningLines: winningLines
+        winningLines: winningLines,
+        pattern: winningLines[0] || null
     };
 }
 
@@ -186,23 +218,62 @@ function getBingoLetter(number) {
  * Format number with letter for display (e.g., "B12", "I23")
  */
 function formatBingoNumber(number) {
+    if (number === 0 || number === "FREE") return "FREE";
     return `${getBingoLetter(number)}${number}`;
 }
 
 // ==================== CARTELA VALIDATION ====================
 
 /**
- * Validate cartela number range
+ * Validate cartela ID format (e.g., "B1_001" or "O15_188")
  */
 function isValidCartelaId(cartelaId) {
-    return cartelaId >= 1 && cartelaId <= config.TOTAL_CARTELAS;
+    // Check if exists in loaded data
+    if (cartelasData[cartelaId]) return true;
+    
+    // Check if exists by prefix
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey) return true;
+    
+    // Validate format: Letter + Number + _ + 3-digit variation
+    const regex = /^[BINGO]\d+_\d{3}$/;
+    return regex.test(cartelaId);
 }
 
 /**
- * Get all cartela IDs (1 to TOTAL_CARTELAS)
+ * Get all cartela IDs (all variations from loaded file)
  */
 function getAllCartelaIds() {
-    return Array.from({ length: config.TOTAL_CARTELAS }, (_, i) => i + 1);
+    return Object.keys(cartelasData);
+}
+
+/**
+ * Get cartela IDs by letter (B, I, N, G, O)
+ */
+function getCartelaIdsByLetter(letter) {
+    return Object.keys(cartelasData).filter(id => id.startsWith(letter));
+}
+
+/**
+ * Get total number of cartelas loaded
+ */
+function getTotalCartelasCount() {
+    return Object.keys(cartelasData).length;
+}
+
+/**
+ * Parse cartela ID into components
+ */
+function parseCartelaId(cartelaId) {
+    const match = cartelaId.match(/^([BINGO])(\d+)_(\d{3})$/);
+    if (!match) return null;
+    
+    return {
+        fullId: cartelaId,
+        letter: match[1],
+        number: parseInt(match[2], 10),
+        variation: parseInt(match[3], 10)
+    };
 }
 
 // ==================== CACHE MANAGEMENT ====================
@@ -211,15 +282,24 @@ function getAllCartelaIds() {
  * Get number of cached cartelas
  */
 function getCachedCartelasCount() {
-    return Object.keys(cartelaData).length;
+    return Object.keys(cartelasData).length;
+}
+
+/**
+ * Reload cartelas from file (useful for hot-reload)
+ */
+function reloadCartelas() {
+    cartelasData = {};
+    cartelaMetadata.clear();
+    return loadCartelasFromFile();
 }
 
 /**
  * Clear cartela cache (useful for testing)
  */
 function clearCartelaCache() {
-    cartelaData = {};
-    saveCartelaData();
+    cartelasData = {};
+    cartelaMetadata.clear();
     console.log("🗑️ Cartela cache cleared");
 }
 
@@ -227,13 +307,18 @@ function clearCartelaCache() {
 module.exports = {
     generateRandomBingoCard,
     getCartelaGrid,
-    saveCartelaData,
-    getCartelaMetadata,
+    getCartela,
+    getCartelaMetadataById,
     checkBingoWin,
     getBingoLetter,
     formatBingoNumber,
     isValidCartelaId,
     getAllCartelaIds,
+    getCartelaIdsByLetter,
+    getTotalCartelasCount,
     getCachedCartelasCount,
+    parseCartelaId,
+    reloadCartelas,
     clearCartelaCache,
+    loadCartelasFromFile,
 };

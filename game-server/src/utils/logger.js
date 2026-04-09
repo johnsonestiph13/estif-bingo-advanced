@@ -27,7 +27,7 @@ const currentLogLevel = LOG_LEVELS[process.env.LOG_LEVEL?.toUpperCase() || (conf
 
 // ==================== LOG FILE CONFIGURATION ====================
 
-const LOG_DIR = path.join(__dirname, "../../../logs");
+const LOG_DIR = path.join(__dirname, "../../logs");
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_LOG_FILES = 5;
 
@@ -39,43 +39,54 @@ if (!fs.existsSync(LOG_DIR)) {
 // ==================== LOG ROTATION ====================
 
 function rotateLogFile(logFilePath) {
-    if (fs.existsSync(logFilePath)) {
-        const stats = fs.statSync(logFilePath);
-        if (stats.size >= MAX_LOG_SIZE) {
-            // Rotate files
-            for (let i = MAX_LOG_FILES - 1; i >= 1; i--) {
-                const oldPath = `${logFilePath}.${i}`;
-                const newPath = `${logFilePath}.${i + 1}`;
-                if (fs.existsSync(oldPath)) {
-                    fs.renameSync(oldPath, newPath);
+    try {
+        if (fs.existsSync(logFilePath)) {
+            const stats = fs.statSync(logFilePath);
+            if (stats.size >= MAX_LOG_SIZE) {
+                // Rotate files
+                for (let i = MAX_LOG_FILES - 1; i >= 1; i--) {
+                    const oldPath = `${logFilePath}.${i}`;
+                    const newPath = `${logFilePath}.${i + 1}`;
+                    if (fs.existsSync(oldPath)) {
+                        fs.renameSync(oldPath, newPath);
+                    }
                 }
+                fs.renameSync(logFilePath, `${logFilePath}.1`);
+                console.log(`📋 Log rotated: ${path.basename(logFilePath)}`);
             }
-            fs.renameSync(logFilePath, `${logFilePath}.1`);
         }
+    } catch (err) {
+        console.error("Log rotation error:", err);
     }
 }
 
 // ==================== FILE WRITING ====================
 
 function writeToFile(level, message, meta = {}) {
-    const timestamp = new Date().toISOString();
-    const logEntry = {
-        timestamp,
-        level: LOG_LEVEL_NAMES[level],
-        message,
-        ...meta
-    };
+    if (!config.LOG_TO_FILE) return;
     
-    const logLine = JSON.stringify(logEntry) + "\n";
-    
-    // Write to main log file
-    const mainLogPath = path.join(LOG_DIR, "game-server.log");
-    rotateLogFile(mainLogPath);
-    fs.appendFileSync(mainLogPath, logLine, "utf8");
-    
-    // Write to level-specific log file
-    const levelLogPath = path.join(LOG_DIR, `${LOG_LEVEL_NAMES[level].toLowerCase()}.log`);
-    fs.appendFileSync(levelLogPath, logLine, "utf8");
+    try {
+        const timestamp = new Date().toISOString();
+        const logEntry = {
+            timestamp,
+            level: LOG_LEVEL_NAMES[level],
+            message,
+            ...meta
+        };
+        
+        const logLine = JSON.stringify(logEntry) + "\n";
+        
+        // Write to main log file
+        const mainLogPath = path.join(LOG_DIR, "game-server.log");
+        rotateLogFile(mainLogPath);
+        fs.appendFileSync(mainLogPath, logLine, "utf8");
+        
+        // Write to level-specific log file
+        const levelLogPath = path.join(LOG_DIR, `${LOG_LEVEL_NAMES[level].toLowerCase()}.log`);
+        fs.appendFileSync(levelLogPath, logLine, "utf8");
+    } catch (err) {
+        console.error("Failed to write to log file:", err);
+    }
 }
 
 // ==================== CONSOLE OUTPUT ====================
@@ -106,7 +117,14 @@ function formatConsoleMessage(level, message, meta = {}) {
     let consoleMessage = `${color}[${timestamp}] ${levelName}: ${message}\x1b[0m`;
     
     if (Object.keys(meta).length > 0) {
-        consoleMessage += ` ${JSON.stringify(meta)}`;
+        // Format meta nicely
+        const metaStr = Object.entries(meta)
+            .map(([k, v]) => {
+                if (typeof v === 'object') return `${k}=${JSON.stringify(v)}`;
+                return `${k}=${v}`;
+            })
+            .join(' ');
+        consoleMessage += ` \x1b[90m${metaStr}\x1b[0m`;
     }
     
     return consoleMessage;
@@ -189,8 +207,8 @@ function requestLogger(req, res, next) {
             url: req.url,
             status: res.statusCode,
             duration: `${duration}ms`,
-            ip: req.ip,
-            userAgent: req.get("user-agent")
+            ip: req.ip || req.socket?.remoteAddress,
+            userAgent: req.get("user-agent")?.substring(0, 100)
         };
         
         if (res.statusCode >= 500) {
@@ -198,7 +216,7 @@ function requestLogger(req, res, next) {
         } else if (res.statusCode >= 400) {
             warn(`HTTP ${res.statusCode}: ${req.method} ${req.url}`, meta);
         } else {
-            info(`HTTP ${res.statusCode}: ${req.method} ${req.url}`, meta);
+            debug(`HTTP ${res.statusCode}: ${req.method} ${req.url}`, meta);
         }
     });
     
@@ -217,10 +235,13 @@ function logSocketEvent(event, socketId, data = null) {
         // Don't log sensitive data
         const safeData = { ...data };
         if (safeData.token) safeData.token = "[REDACTED]";
+        if (safeData.password) safeData.password = "[REDACTED]";
         meta.data = safeData;
     }
     debug(`Socket event: ${event}`, meta);
 }
+
+// ==================== GAME-SPECIFIC LOGGING ====================
 
 /**
  * Log game action
@@ -230,6 +251,148 @@ function logSocketEvent(event, socketId, data = null) {
 function logGameAction(action, details = {}) {
     const meta = { action, ...details };
     info(`Game action: ${action}`, meta);
+}
+
+/**
+ * Log cartela selection
+ * @param {string} cartelaId - Cartela ID (e.g., "B1_001")
+ * @param {number} telegramId - User's Telegram ID
+ * @param {string} username - User's username
+ * @param {number} round - Round number
+ */
+function logCartelaSelection(cartelaId, telegramId, username, round) {
+    info(`Cartela selected: ${cartelaId}`, {
+        cartelaId,
+        telegramId,
+        username,
+        round,
+        action: "select_cartela"
+    });
+}
+
+/**
+ * Log cartela deselection
+ * @param {string} cartelaId - Cartela ID (e.g., "B1_001")
+ * @param {number} telegramId - User's Telegram ID
+ * @param {string} username - User's username
+ * @param {number} round - Round number
+ */
+function logCartelaDeselection(cartelaId, telegramId, username, round) {
+    info(`Cartela deselected: ${cartelaId}`, {
+        cartelaId,
+        telegramId,
+        username,
+        round,
+        action: "deselect_cartela"
+    });
+}
+
+/**
+ * Log winner
+ * @param {string} cartelaId - Winning cartela ID
+ * @param {number} telegramId - Winner's Telegram ID
+ * @param {string} username - Winner's username
+ * @param {number} amount - Winning amount
+ * @param {number} round - Round number
+ * @param {string[]} winningLines - Winning lines
+ */
+function logWinner(cartelaId, telegramId, username, amount, round, winningLines) {
+    info(`🏆 WINNER: ${username} won ${amount} ETB with cartela ${cartelaId}`, {
+        cartelaId,
+        telegramId,
+        username,
+        amount,
+        round,
+        winningLines,
+        action: "winner"
+    });
+}
+
+/**
+ * Log round start
+ * @param {number} round - Round number
+ * @param {number} totalCartelas - Total cartelas selected
+ * @param {number} totalBet - Total bet amount
+ * @param {number} prizePool - Prize pool amount
+ */
+function logRoundStart(round, totalCartelas, totalBet, prizePool) {
+    info(`Round ${round} started`, {
+        round,
+        totalCartelas,
+        totalBet,
+        prizePool,
+        winPercentage: config.DEFAULT_WIN_PERCENTAGE,
+        action: "round_start"
+    });
+}
+
+/**
+ * Log round end
+ * @param {number} round - Round number
+ * @param {number} winnerCount - Number of winners
+ * @param {number} totalPayout - Total payout amount
+ * @param {number} commission - Commission amount
+ */
+function logRoundEnd(round, winnerCount, totalPayout, commission) {
+    info(`Round ${round} ended`, {
+        round,
+        winnerCount,
+        totalPayout,
+        commission,
+        action: "round_end"
+    });
+}
+
+/**
+ * Log number drawn
+ * @param {number} number - Drawn number
+ * @param {number} round - Round number
+ * @param {number} drawnCount - Total drawn count
+ */
+function logNumberDrawn(number, round, drawnCount) {
+    const letter = number <= 15 ? 'B' : number <= 30 ? 'I' : number <= 45 ? 'N' : number <= 60 ? 'G' : 'O';
+    trace(`Number drawn: ${letter}${number}`, {
+        number,
+        letter,
+        round,
+        drawnCount,
+        action: "number_drawn"
+    });
+}
+
+/**
+ * Log admin action
+ * @param {string} adminEmail - Admin email
+ * @param {string} action - Action performed
+ * @param {object} details - Action details
+ */
+function logAdminAction(adminEmail, action, details = {}) {
+    info(`Admin action: ${action} by ${adminEmail}`, {
+        adminEmail,
+        action,
+        ...details,
+        type: "admin_action"
+    });
+}
+
+/**
+ * Log balance change
+ * @param {number} telegramId - User's Telegram ID
+ * @param {string} username - User's username
+ * @param {number} amount - Amount changed
+ * @param {number} newBalance - New balance
+ * @param {string} reason - Reason for change
+ */
+function logBalanceChange(telegramId, username, amount, newBalance, reason) {
+    const changeType = amount >= 0 ? "add" : "deduct";
+    info(`Balance ${changeType}: ${username} ${amount >= 0 ? '+' : ''}${amount} ETB`, {
+        telegramId,
+        username,
+        amount,
+        newBalance,
+        reason,
+        action: "balance_change"
+    });
 }
 
 // ==================== PERFORMANCE LOGGING ====================
@@ -254,17 +417,82 @@ async function measureTime(name, fn) {
     }
 }
 
+/**
+ * Log memory usage
+ */
+function logMemoryUsage() {
+    const usage = process.memoryUsage();
+    debug("Memory usage", {
+        rss: `${Math.round(usage.rss / 1024 / 1024)} MB`,
+        heapTotal: `${Math.round(usage.heapTotal / 1024 / 1024)} MB`,
+        heapUsed: `${Math.round(usage.heapUsed / 1024 / 1024)} MB`,
+        external: `${Math.round(usage.external / 1024 / 1024)} MB`
+    });
+}
+
+// ==================== STARTUP LOGGING ====================
+
+/**
+ * Log server startup information
+ */
+function logStartup() {
+    info("🚀 Estif Bingo 24/7 Server Starting", {
+        version: "3.0.0",
+        nodeVersion: process.version,
+        environment: config.NODE_ENV,
+        logLevel: LOG_LEVEL_NAMES[currentLogLevel],
+        totalCartelas: config.TOTAL_CARTELAS,
+        maxCartelasPerPlayer: config.MAX_CARTELAS,
+        betAmount: config.BET_AMOUNT,
+        selectionTime: config.SELECTION_TIME,
+        drawInterval: config.DRAW_INTERVAL
+    });
+}
+
+/**
+ * Log shutdown information
+ */
+function logShutdown() {
+    info("🛑 Estif Bingo 24/7 Server Shutting Down", {
+        timestamp: new Date().toISOString()
+    });
+}
+
 // ==================== EXPORTS ====================
 
 module.exports = {
+    // Core logging
     error,
     warn,
     info,
     debug,
     trace,
+    
+    // Middleware
     requestLogger,
+    
+    // Socket logging
     logSocketEvent,
+    
+    // Game-specific logging
     logGameAction,
+    logCartelaSelection,
+    logCartelaDeselection,
+    logWinner,
+    logRoundStart,
+    logRoundEnd,
+    logNumberDrawn,
+    logAdminAction,
+    logBalanceChange,
+    
+    // Performance logging
     measureTime,
+    logMemoryUsage,
+    
+    // Startup/shutdown
+    logStartup,
+    logShutdown,
+    
+    // Constants
     LOG_LEVELS
 };

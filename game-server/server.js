@@ -75,6 +75,20 @@ async function callBotAPI(endpoint, body) {
     return response.json();
 }
 
+async function callBotAPIGet(endpoint) {
+    const response = await fetch(`${BOT_API_URL}${endpoint}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': API_SECRET
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Bot API error: ${response.status}`);
+    }
+    return response.json();
+}
+
 // ==================== POSTGRESQL DATABASE ====================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -218,7 +232,7 @@ async function initDatabase() {
                 username VARCHAR(50),
                 type VARCHAR(20) NOT NULL,
                 amount DECIMAL(10,2) NOT NULL,
-                cartela INTEGER,
+                cartela VARCHAR(20),
                 round INTEGER,
                 note TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -227,7 +241,7 @@ async function initDatabase() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS active_round_selections (
                 round_number INTEGER NOT NULL,
-                cartela_number INTEGER NOT NULL,
+                cartela_number VARCHAR(20) NOT NULL,
                 telegram_id BIGINT NOT NULL,
                 selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (round_number, cartela_number)
@@ -266,17 +280,62 @@ async function logGameTransaction(telegramId, username, type, amount, cartela, r
     `, [telegramId, username, type, amount, cartela, round, note]);
 }
 
-// ==================== CARTELA DATA ====================
+// ==================== LOAD CARTELAS FROM JSON FILE ====================
 const CARTELA_DATA_FILE = path.join(__dirname, "data/cartelas.json");
-let cartelaData = {};
+let cartelasData = {};
+
 try {
     if (fs.existsSync(CARTELA_DATA_FILE)) {
-        cartelaData = JSON.parse(fs.readFileSync(CARTELA_DATA_FILE, "utf8"));
-        console.log(`✅ Loaded ${Object.keys(cartelaData).length} cartelas`);
+        const rawData = fs.readFileSync(CARTELA_DATA_FILE, "utf8");
+        cartelasData = JSON.parse(rawData);
+        console.log(`✅ Loaded ${Object.keys(cartelasData).length} cartelas from data/cartelas.json`);
+    } else {
+        console.warn(`⚠️ Cartela file not found at: ${CARTELA_DATA_FILE}`);
     }
-} catch (err) { console.log("⚠️ No cartela data file"); }
-function saveCartelaData() {
-    try { fs.writeFileSync(CARTELA_DATA_FILE, JSON.stringify(cartelaData, null, 2)); } catch (err) { console.error("Save cartela error:", err); }
+} catch (err) {
+    console.error("❌ Error loading cartelas:", err.message);
+}
+
+// ==================== CARTELA HELPER FUNCTIONS ====================
+function getRandomNumbers(min, max, count) {
+    const numbers = [];
+    for (let i = min; i <= max; i++) numbers.push(i);
+    for (let i = numbers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+    }
+    return numbers.slice(0, count);
+}
+
+function generateRandomGrid() {
+    const b = getRandomNumbers(1, 15, 5);
+    const i = getRandomNumbers(16, 30, 5);
+    const n = getRandomNumbers(31, 45, 5);
+    const g = getRandomNumbers(46, 60, 5);
+    const o = getRandomNumbers(61, 75, 5);
+    n[2] = 0;
+    return [
+        [b[0], i[0], n[0], g[0], o[0]],
+        [b[1], i[1], n[1], g[1], o[1]],
+        [b[2], i[2], n[2], g[2], o[2]],
+        [b[3], i[3], n[3], g[3], o[3]],
+        [b[4], i[4], n[4], g[4], o[4]]
+    ];
+}
+
+function getCartelaGrid(cartelaId) {
+    // First, try exact match
+    if (cartelasData[cartelaId]) {
+        return cartelasData[cartelaId].grid;
+    }
+    // Try to find by prefix (e.g., "B1" instead of "B1_001")
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey) {
+        return cartelasData[matchingKey].grid;
+    }
+    // Fallback: generate random grid
+    console.warn(`Cartela ${cartelaId} not found, generating random grid`);
+    return generateRandomGrid();
 }
 
 // ==================== GAME CONSTANTS ====================
@@ -286,8 +345,8 @@ const NEXT_ROUND_DELAY = parseInt(process.env.NEXT_ROUND_DELAY) || 6000;
 const BET_AMOUNT = parseFloat(process.env.BET_AMOUNT) || 10;
 const WIN_PERCENTAGES = [70, 75, 76, 80];
 const DEFAULT_WIN_PERCENTAGE = 75;
-const MAX_CARTELAS = 2;
-const TOTAL_CARTELAS = 1000;
+const MAX_CARTELAS = 4;
+const TOTAL_CARTELAS = Object.keys(cartelasData).length || 1000;
 
 // ==================== GLOBAL STATE ====================
 let gameState = {
@@ -334,55 +393,43 @@ function broadcastToUserDevices(telegramId, event, data, excludeSocketId = null)
     const sessions = activeSessions.get(telegramId);
     if (!sessions) return;
     for (const socketId of sessions) {
-        if (socketId !== excludeSocketId) io.to(socketId).emit(event, data);
+        if (socketId !== excludeSocketId) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) socket.emit(event, data);
+        }
     }
 }
 
-// ==================== CARTELA HELPERS ====================
-function generateRandomBingoCard() {
-    const getRandomNumbers = (min, max, count) => {
-        const nums = [], avail = [];
-        for (let i = min; i <= max; i++) avail.push(i);
-        for (let i = 0; i < count; i++) {
-            const idx = Math.floor(Math.random() * avail.length);
-            nums.push(avail[idx]);
-            avail.splice(idx, 1);
-        }
-        return nums;
-    };
-    const b = getRandomNumbers(1, 15, 5);
-    const i = getRandomNumbers(16, 30, 5);
-    const n = getRandomNumbers(31, 45, 5);
-    const g = getRandomNumbers(46, 60, 5);
-    const o = getRandomNumbers(61, 75, 5);
-    n[2] = "FREE";
-    return [
-        [b[0], i[0], n[0], g[0], o[0]],
-        [b[1], i[1], n[1], g[1], o[1]],
-        [b[2], i[2], n[2], g[2], o[2]],
-        [b[3], i[3], n[3], g[3], o[3]],
-        [b[4], i[4], n[4], g[4], o[4]]
-    ];
-}
-function getCartelaGrid(cartelaId) {
-    if (cartelaData[cartelaId]) return cartelaData[cartelaId].grid;
-    const grid = generateRandomBingoCard();
-    cartelaData[cartelaId] = { id: cartelaId, grid };
-    saveCartelaData();
-    return grid;
-}
+// ==================== BINGO CHECKING ====================
 function checkBingoWin(cartelaId, drawnNumbers) {
     const grid = getCartelaGrid(cartelaId);
     if (!grid) return { won: false, winningLines: [] };
+    
     const drawnSet = new Set(drawnNumbers);
-    drawnSet.add("FREE");
+    drawnSet.add(0); // FREE space is represented as 0
+    
     const lines = [];
-    for (let r = 0; r < 5; r++) if (grid[r].every(v => drawnSet.has(v))) lines.push(`Row ${r+1}`);
+    
+    // Check rows
+    for (let r = 0; r < 5; r++) {
+        if (grid[r].every(v => drawnSet.has(v))) {
+            lines.push(`Row ${r+1}`);
+        }
+    }
+    
+    // Check columns
     for (let c = 0; c < 5; c++) {
         let win = true;
-        for (let r = 0; r < 5; r++) if (!drawnSet.has(grid[r][c])) { win = false; break; }
+        for (let r = 0; r < 5; r++) {
+            if (!drawnSet.has(grid[r][c])) {
+                win = false;
+                break;
+            }
+        }
         if (win) lines.push(`Column ${c+1}`);
     }
+    
+    // Check diagonals
     let d1 = true, d2 = true;
     for (let i = 0; i < 5; i++) {
         if (!drawnSet.has(grid[i][i])) d1 = false;
@@ -390,11 +437,15 @@ function checkBingoWin(cartelaId, drawnNumbers) {
     }
     if (d1) lines.push("Diagonal ↘");
     if (d2) lines.push("Diagonal ↙");
+    
     return { won: lines.length > 0, winningLines: lines };
 }
 
 // ==================== GLOBAL CARTELA TRACKING ====================
-function isCartelaAvailable(cartelaNumber) { return !globalTakenCartelas.has(cartelaNumber); }
+function isCartelaAvailable(cartelaNumber) { 
+    return !globalTakenCartelas.has(cartelaNumber); 
+}
+
 async function reserveCartela(cartelaNumber, telegramId, username) {
     if (globalTakenCartelas.has(cartelaNumber)) return false;
     globalTakenCartelas.set(cartelaNumber, { telegramId, username, timestamp: Date.now() });
@@ -406,6 +457,7 @@ async function reserveCartela(cartelaNumber, telegramId, username) {
     `, [gameState.round, cartelaNumber, telegramId]);
     return true;
 }
+
 async function releaseCartela(cartelaNumber, telegramId) {
     const cartela = globalTakenCartelas.get(cartelaNumber);
     if (cartela && cartela.telegramId === telegramId) {
@@ -419,12 +471,14 @@ async function releaseCartela(cartelaNumber, telegramId) {
     }
     return false;
 }
+
 function calculateRewardPool() {
     const totalBetAmount = globalTotalSelectedCartelas * BET_AMOUNT;
     const winnerReward = (totalBetAmount * gameState.winPercentage) / 100;
     const adminCommission = totalBetAmount - winnerReward;
     return { totalBetAmount, winnerReward, adminCommission, totalCartelas: globalTotalSelectedCartelas };
 }
+
 function broadcastRewardPool() {
     const { totalBetAmount, winnerReward, totalCartelas } = calculateRewardPool();
     io.emit("rewardPoolUpdate", {
@@ -444,7 +498,10 @@ function getBingoLetter(num) {
     if (num <= 60) return "G";
     return "O";
 }
-function formatTime(sec) { return `${Math.floor(sec/60)}:${(sec%60).toString().padStart(2,"0")}`; }
+
+function formatTime(sec) { 
+    return `${Math.floor(sec/60)}:${(sec%60).toString().padStart(2,"0")}`; 
+}
 
 function broadcastGameState() {
     const playersList = Array.from(gameState.players.values()).map(p => ({
@@ -458,8 +515,16 @@ function broadcastGameState() {
         totalBet: gameState.totalBet, winnerReward: gameState.winnerReward
     });
 }
-function broadcastTimer() { io.emit("timerUpdate", { seconds: gameState.timer, round: gameState.round, formatted: formatTime(gameState.timer) }); }
-function stopGame() { if (drawTimer) clearInterval(drawTimer); drawTimer = null; gameState.gameActive = false; }
+
+function broadcastTimer() { 
+    io.emit("timerUpdate", { seconds: gameState.timer, round: gameState.round, formatted: formatTime(gameState.timer) }); 
+}
+
+function stopGame() { 
+    if (drawTimer) clearInterval(drawTimer); 
+    drawTimer = null; 
+    gameState.gameActive = false; 
+}
 
 function startSelectionTimer() {
     if (selectionTimer) clearInterval(selectionTimer);
@@ -469,11 +534,19 @@ function startSelectionTimer() {
     gameState.gameActive = false;
     broadcastGameState();
     broadcastTimer();
+    
     selectionTimer = setInterval(() => {
-        if (gameState.status !== "selection") { clearInterval(selectionTimer); selectionTimer = null; return; }
+        if (gameState.status !== "selection") { 
+            clearInterval(selectionTimer); 
+            selectionTimer = null; 
+            return; 
+        }
         gameState.timer--;
         broadcastTimer();
-        if (gameState.timer === 10) io.emit("warning", { message: "⚠️ Only 10 seconds left to select cartelas!", type: "warning" });
+        
+        if (gameState.timer === 10) {
+            io.emit("warning", { message: "⚠️ Only 10 seconds left to select cartelas!", type: "warning" });
+        }
         if (gameState.timer <= 0) {
             clearInterval(selectionTimer);
             selectionTimer = null;
@@ -487,50 +560,79 @@ async function startActiveGame() {
     gameState.drawnNumbers = [];
     gameState.winners = [];
     gameState.gameActive = true;
+    
     const totalCartelas = globalTotalSelectedCartelas;
     const playersWithCartelas = Array.from(gameState.players.values()).filter(p => p.selectedCartelas.length > 0).length;
     const { totalBetAmount, winnerReward, adminCommission } = calculateRewardPool();
+    
     gameState.totalBet = totalBetAmount;
     gameState.winnerReward = winnerReward;
     gameState.adminCommission = adminCommission;
+    
     broadcastGameState();
+    
     io.emit("gameStarted", {
         round: gameState.round, totalPlayers: playersWithCartelas, totalCartelas,
         totalBet: gameState.totalBet, winnerReward: gameState.winnerReward,
         winPercentage: gameState.winPercentage,
         message: `🎲 Game started! ${totalCartelas} cartelas selected. Prize Pool: ${gameState.winnerReward} ETB`
     });
+    
     io.emit("finalRewardPool", {
         totalSelectedCartelas: totalCartelas, totalBetAmount, winnerReward,
         winPercentage: gameState.winPercentage,
         message: `🎯 ${totalCartelas} cartelas selected! Total pool: ${totalBetAmount} ETB. Winner takes ${winnerReward} ETB!`
     });
+    
+    // Shuffle numbers 1-75
     const numbers = Array.from({ length: 75 }, (_, i) => i+1);
     for (let i = numbers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i+1));
         [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
     }
+    
     let idx = 0;
     drawTimer = setInterval(() => {
         if (gameState.status !== "active" || !gameState.gameActive || gameState.winners.length > 0) {
             if (drawTimer) clearInterval(drawTimer);
             return;
         }
-        if (idx >= numbers.length) { endRound([]); return; }
+        if (idx >= numbers.length) { 
+            endRound([]); 
+            return; 
+        }
+        
         const num = numbers[idx++];
         gameState.drawnNumbers.push(num);
-        io.emit("numberDrawn", { number: num, letter: getBingoLetter(num), drawnCount: gameState.drawnNumbers.length, remaining: 75 - gameState.drawnNumbers.length });
+        
+        io.emit("numberDrawn", { 
+            number: num, 
+            letter: getBingoLetter(num), 
+            drawnCount: gameState.drawnNumbers.length, 
+            remaining: 75 - gameState.drawnNumbers.length,
+            numbers: gameState.drawnNumbers
+        });
+        
         broadcastGameState();
+        
+        // Check for winners
         const newWinners = [], details = [];
         for (const [sid, pl] of gameState.players) {
             if (pl.selectedCartelas.length && !gameState.winners.includes(sid)) {
                 for (const cid of pl.selectedCartelas) {
                     const { won, winningLines } = checkBingoWin(cid, gameState.drawnNumbers);
-                    if (won) { newWinners.push(sid); details.push({ socketId: sid, cartelaId: cid, winningLines }); break; }
+                    if (won) { 
+                        newWinners.push(sid); 
+                        details.push({ socketId: sid, cartelaId: cid, winningLines, pattern: winningLines[0] }); 
+                        break; 
+                    }
                 }
             }
         }
-        if (newWinners.length && gameState.winners.length === 0) endRound(newWinners, details);
+        
+        if (newWinners.length && gameState.winners.length === 0) {
+            endRound(newWinners, details);
+        }
     }, DRAW_INTERVAL);
 }
 
@@ -540,33 +642,60 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
     gameState.status = "ended";
     gameState.winners = winnerSocketIds;
     gameState.roundEndTime = new Date();
+    
     const winnerCount = winnerSocketIds.length;
     const perWinner = winnerCount ? gameState.winnerReward / winnerCount : 0;
     const winnerNames = [], winnerCartelas = [];
+    
     for (let i = 0; i < winnerSocketIds.length; i++) {
         const sid = winnerSocketIds[i];
         const pl = gameState.players.get(sid);
         const det = winnerDetails.find(d => d.socketId === sid);
         if (pl) {
             winnerNames.push(pl.username);
-            if (det) winnerCartelas.push({ username: pl.username, cartelaId: det.cartelaId, winningLines: det.winningLines });
-            io.to(sid).emit("youWon", { amount: perWinner, cartelaId: det?.cartelaId, winningLines: det?.winningLines, newBalance: pl.balance, message: `🎉 You won ${perWinner.toFixed(2)} ETB!` });
+            if (det) {
+                winnerCartelas.push({ 
+                    username: pl.username, 
+                    cartelaId: det.cartelaId, 
+                    winningLines: det.winningLines,
+                    pattern: det.pattern
+                });
+            }
+            
+            // Send win notification to winner
+            io.to(sid).emit("youWon", { 
+                amount: perWinner, 
+                cartelaId: det?.cartelaId, 
+                winningLines: det?.winningLines,
+                pattern: det?.pattern,
+                newBalance: pl.balance + perWinner,
+                message: `🎉 You won ${perWinner.toFixed(2)} ETB!` 
+            });
+            
+            // Update balance via bot API
             try {
                 const result = await callBotAPI("/api/add", {
                     telegram_id: pl.telegramId,
                     amount: perWinner,
+                    round_id: gameState.round,
                     reason: `won round ${gameState.round}`
                 });
                 if (result.success) {
                     pl.balance = result.new_balance;
-                    broadcastToUserDevices(pl.telegramId, "balanceUpdated", { balance: pl.balance, added: perWinner });
+                    broadcastToUserDevices(pl.telegramId, "balanceUpdated", { 
+                        balance: pl.balance, 
+                        added: perWinner 
+                    });
                 }
             } catch (err) {
                 console.error("Error calling bot API for add:", err);
             }
+            
             await logGameTransaction(pl.telegramId, pl.username, "win", perWinner, det?.cartelaId, gameState.round, "Round win");
         }
     }
+    
+    // Save round to database
     await pool.query(`
         INSERT INTO game_rounds (round_number, total_players, total_cartelas, total_pool, winner_reward, admin_commission, winners, winner_cartelas, win_percentage, timestamp)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -582,12 +711,21 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
         gameState.winPercentage,
         new Date().toISOString()
     ]);
+    
+    // Broadcast round ended
     io.emit("roundEnded", {
-        winners: winnerNames, winnerCartelas, winnerCount, winnerReward: perWinner,
-        totalPool: gameState.totalBet, adminCommission: gameState.adminCommission,
-        winPercentage: gameState.winPercentage, round: gameState.round,
+        winners: winnerNames,
+        winnerCartelas: winnerCartelas,
+        winnerCount: winnerCount,
+        prizePerWinner: perWinner,
+        totalPrize: gameState.winnerReward,
+        totalPool: gameState.totalBet,
+        commission: gameState.adminCommission,
+        winPercentage: gameState.winPercentage,
+        round: gameState.round,
         message: winnerCount ? `🎉 BINGO! Winners: ${winnerNames.join(", ")}. Each wins ${perWinner.toFixed(2)} ETB!` : "No winners this round!"
     });
+    
     broadcastGameState();
     scheduleNextRound();
 }
@@ -595,15 +733,32 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
 function scheduleNextRound() {
     if (nextRoundTimer) clearTimeout(nextRoundTimer);
     let cd = NEXT_ROUND_DELAY / 1000;
-    const interval = setInterval(() => { io.emit("nextRoundCountdown", { seconds: cd }); cd--; if (cd < 0) clearInterval(interval); }, 1000);
-    nextRoundTimer = setTimeout(() => { resetForNextRound(); nextRoundTimer = null; }, NEXT_ROUND_DELAY);
+    const interval = setInterval(() => { 
+        io.emit("nextRoundCountdown", { seconds: cd }); 
+        cd--; 
+        if (cd < 0) clearInterval(interval); 
+    }, 1000);
+    
+    nextRoundTimer = setTimeout(() => { 
+        resetForNextRound(); 
+        nextRoundTimer = null; 
+    }, NEXT_ROUND_DELAY);
 }
 
 async function resetForNextRound() {
-    for (const [_, pl] of gameState.players) pl.selectedCartelas = [];
+    // Clear player selections
+    for (const [_, pl] of gameState.players) {
+        pl.selectedCartelas = [];
+    }
+    
+    // Clear global cartela tracking
     globalTakenCartelas.clear();
     globalTotalSelectedCartelas = 0;
+    
+    // Clear database selections
     await pool.query("DELETE FROM active_round_selections WHERE round_number = $1", [gameState.round]);
+    
+    // Increment round and reset state
     gameState.round++;
     gameState.status = "selection";
     gameState.timer = SELECTION_TIME;
@@ -613,10 +768,18 @@ async function resetForNextRound() {
     gameState.winnerReward = 0;
     gameState.adminCommission = 0;
     gameState.gameActive = false;
+    
     broadcastGameState();
     broadcastTimer();
     broadcastRewardPool();
-    io.emit("nextRound", { round: gameState.round, timer: SELECTION_TIME, message: `🎲 Round ${gameState.round} starting! Select up to ${MAX_CARTELAS} cartelas within ${SELECTION_TIME} seconds.` });
+    
+    io.emit("newRound", { 
+        round: gameState.round, 
+        timer: SELECTION_TIME,
+        winPercentage: gameState.winPercentage,
+        message: `🎲 Round ${gameState.round} starting! Select up to ${MAX_CARTELAS} cartelas within ${SELECTION_TIME} seconds.` 
+    });
+    
     startSelectionTimer();
 }
 
@@ -627,44 +790,56 @@ async function recoverFromCrash() {
         FROM active_round_selections
         ORDER BY selected_at
     `);
+    
     if (res.rows.length === 0) {
         console.log("No unfinished round found, starting fresh.");
         return;
     }
+    
     const roundNumber = res.rows[0].round_number;
     console.log(`Recovering round ${roundNumber} with ${res.rows.length} selections`);
+    
     gameState.round = roundNumber;
     gameState.status = "selection";
     gameState.timer = SELECTION_TIME;
     gameState.drawnNumbers = [];
     gameState.winners = [];
     gameState.gameActive = false;
+    
     for (const row of res.rows) {
-        globalTakenCartelas.set(row.cartela_number, { telegramId: row.telegram_id, username: "recovering...", timestamp: Date.now() });
+        globalTakenCartelas.set(row.cartela_number, { 
+            telegramId: row.telegram_id, 
+            username: "recovering...", 
+            timestamp: Date.now() 
+        });
     }
+    
     globalTotalSelectedCartelas = globalTakenCartelas.size;
     const { totalBetAmount, winnerReward, adminCommission } = calculateRewardPool();
     gameState.totalBet = totalBetAmount;
     gameState.winnerReward = winnerReward;
     gameState.adminCommission = adminCommission;
+    
     console.log(`Recovered: ${globalTotalSelectedCartelas} cartelas, pool: ${gameState.totalBet} ETB`);
     startSelectionTimer();
 }
 
 // ==================== ADMIN AUTH ====================
-// UPDATED: Your admin email and password hash
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "johnsonestiph13@gmail.com";
 let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 if (!ADMIN_PASSWORD_HASH) {
-    // This is the bcrypt hash for "admin123"
     ADMIN_PASSWORD_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ4Q6Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5";
 }
 
 app.post("/api/admin/login", authLimiter, async (req, res) => {
     const { email, password } = req.body;
-    if (email !== ADMIN_EMAIL) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    if (email !== ADMIN_EMAIL) {
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
     const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
-    if (!isValid) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    if (!isValid) {
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
     const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "24h" });
     adminTokens.set(token, Date.now());
     res.json({ success: true, token });
@@ -672,17 +847,16 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
 
 function verifyAdminToken(req, res, next) {
     const token = req.headers.authorization?.split(" ")[1];
-    if (!token || !adminTokens.has(token)) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!token || !adminTokens.has(token)) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
     next();
 }
 
 // ==================== ADMIN ENDPOINTS ====================
 app.get("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     try {
-        const response = await fetch(`${BOT_API_URL}/api/commission`, {
-            headers: { 'X-API-Key': API_SECRET }
-        });
-        const data = await response.json();
+        const data = await callBotAPIGet("/api/commission");
         res.json({ success: true, percentage: data.percentage });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -691,7 +865,9 @@ app.get("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
 
 app.post("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     const { percentage } = req.body;
-    if (!WIN_PERCENTAGES.includes(percentage)) return res.status(400).json({ success: false, message: "Invalid percentage" });
+    if (!WIN_PERCENTAGES.includes(percentage)) {
+        return res.status(400).json({ success: false, message: "Invalid percentage" });
+    }
     try {
         await callBotAPI("/api/commission", { percentage });
         gameState.winPercentage = percentage;
@@ -729,10 +905,18 @@ app.get("/api/admin/stats", verifyAdminToken, (req, res) => {
     const players = Array.from(gameState.players.values());
     const totalBalance = players.reduce((s, p) => s + (p.balance || 0), 0);
     res.json({
-        success: true, status: gameState.status, round: gameState.round, timer: gameState.timer,
-        drawnNumbers: gameState.drawnNumbers, playersCount: players.length, totalBalance: totalBalance.toFixed(2),
-        winPercentage: gameState.winPercentage, totalBet: gameState.totalBet, winnerReward: gameState.winnerReward,
-        adminCommission: gameState.adminCommission, globalSelectedCartelas: globalTotalSelectedCartelas
+        success: true,
+        status: gameState.status,
+        round: gameState.round,
+        timer: gameState.timer,
+        drawnNumbers: gameState.drawnNumbers,
+        playersCount: players.length,
+        totalBalance: totalBalance.toFixed(2),
+        winPercentage: gameState.winPercentage,
+        totalBet: gameState.totalBet,
+        winnerReward: gameState.winnerReward,
+        adminCommission: gameState.adminCommission,
+        globalSelectedCartelas: globalTotalSelectedCartelas
     });
 });
 
@@ -741,27 +925,51 @@ app.post("/api/admin/start-game", verifyAdminToken, (req, res) => {
         if (selectionTimer) clearInterval(selectionTimer);
         startActiveGame();
         res.json({ success: true, message: "Game started forcefully!" });
-    } else res.json({ success: false, message: `Cannot start, status: ${gameState.status}` });
+    } else {
+        res.json({ success: false, message: `Cannot start, status: ${gameState.status}` });
+    }
 });
 
 app.post("/api/admin/end-game", verifyAdminToken, (req, res) => {
-    if (gameState.status === "active") { stopGame(); endRound([]); res.json({ success: true }); }
-    else res.json({ success: false });
+    if (gameState.status === "active") { 
+        stopGame(); 
+        endRound([]); 
+        res.json({ success: true }); 
+    } else {
+        res.json({ success: false });
+    }
 });
 
 app.post("/api/admin/reset-game", verifyAdminToken, async (req, res) => {
     stopGame();
     if (selectionTimer) clearInterval(selectionTimer);
     if (nextRoundTimer) clearTimeout(nextRoundTimer);
+    
     await pool.query("DELETE FROM active_round_selections");
+    
     gameState = {
-        status: "selection", round: 1, timer: SELECTION_TIME, drawnNumbers: [], winners: [],
-        players: gameState.players, totalBet: 0, winnerReward: 0, adminCommission: 0,
-        winPercentage: gameState.winPercentage, roundStartTime: null, roundEndTime: null, gameActive: false
+        status: "selection",
+        round: 1,
+        timer: SELECTION_TIME,
+        drawnNumbers: [],
+        winners: [],
+        players: gameState.players,
+        totalBet: 0,
+        winnerReward: 0,
+        adminCommission: 0,
+        winPercentage: gameState.winPercentage,
+        roundStartTime: null,
+        roundEndTime: null,
+        gameActive: false
     };
+    
     globalTakenCartelas.clear();
     globalTotalSelectedCartelas = 0;
-    for (const [_, pl] of gameState.players) pl.selectedCartelas = [];
+    
+    for (const [_, pl] of gameState.players) {
+        pl.selectedCartelas = [];
+    }
+    
     startSelectionTimer();
     broadcastRewardPool();
     io.emit("gameReset", { message: "Game reset by admin" });
@@ -770,10 +978,42 @@ app.post("/api/admin/reset-game", verifyAdminToken, async (req, res) => {
 
 app.get("/api/admin/players", verifyAdminToken, (req, res) => {
     const players = Array.from(gameState.players.values()).map(p => ({
-        username: p.username, telegramId: p.telegramId,
-        selectedCount: p.selectedCartelas.length, balance: p.balance
+        username: p.username,
+        telegramId: p.telegramId,
+        selectedCount: p.selectedCartelas.length,
+        balance: p.balance
     }));
     res.json({ success: true, players });
+});
+
+app.post("/api/admin/search-players", verifyAdminToken, async (req, res) => {
+    const { search } = req.body;
+    try {
+        const result = await callBotAPI("/api/search-players", { search });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+app.get("/api/admin/player/:telegramId", verifyAdminToken, async (req, res) => {
+    const { telegramId } = req.params;
+    try {
+        const result = await callBotAPI("/api/get-user", { telegram_id: parseInt(telegramId) });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+app.post("/api/admin/adjust-balance", verifyAdminToken, async (req, res) => {
+    const { telegram_id, amount } = req.body;
+    try {
+        const result = await callBotAPI("/api/adjust-balance", { telegram_id, amount });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 // ==================== REPORT ENDPOINTS ====================
@@ -821,7 +1061,9 @@ app.get("/api/reports/monthly", verifyAdminToken, async (req, res) => {
 
 app.get("/api/reports/range", verifyAdminToken, async (req, res) => {
     const { startDate, endDate } = req.query;
-    if (!startDate || !endDate) return res.status(400).json({ success: false, message: "startDate and endDate required" });
+    if (!startDate || !endDate) {
+        return res.status(400).json({ success: false, message: "startDate and endDate required" });
+    }
     const rounds = await pool.query(`
         SELECT * FROM game_rounds WHERE DATE(timestamp) BETWEEN $1 AND $2 ORDER BY round_id DESC
     `, [startDate, endDate]);
@@ -846,18 +1088,65 @@ function getWeekNumber(date) {
 }
 
 // ==================== GAME API ENDPOINTS ====================
+app.post("/api/exchange-code", async (req, res) => {
+    const { code } = req.body;
+    if (!code) {
+        return res.status(400).json({ success: false, error: "Code required" });
+    }
+    
+    try {
+        const result = await callBotAPI("/api/exchange-code", { code });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// UPDATED: Cartela endpoint that works with string IDs like "B1_001", "O15_188"
 app.get("/api/cartela/:id", (req, res) => {
-    const id = parseInt(req.params.id);
-    if (id < 1 || id > TOTAL_CARTELAS) return res.status(400).json({ success: false, message: "Invalid ID" });
-    res.json({ success: true, cartelaId: id, grid: getCartelaGrid(id) });
+    const cartelaId = req.params.id;
+    
+    // Check if cartela exists in our loaded data
+    if (cartelasData[cartelaId]) {
+        return res.json({ 
+            success: true, 
+            cartelaId: cartelaId, 
+            grid: cartelasData[cartelaId].grid 
+        });
+    }
+    
+    // Try to find by prefix (e.g., "B1" instead of "B1_001")
+    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    if (matchingKey) {
+        return res.json({ 
+            success: true, 
+            cartelaId: matchingKey, 
+            grid: cartelasData[matchingKey].grid 
+        });
+    }
+    
+    // Cartela not found
+    res.status(404).json({ 
+        success: false, 
+        message: `Cartela ${cartelaId} not found` 
+    });
 });
 
 app.get("/api/global-stats", (req, res) => {
     const { totalBetAmount, winnerReward, totalCartelas } = calculateRewardPool();
-    res.json({ success: true, totalSelectedCartelas: totalCartelas, totalBetAmount, winnerReward, winPercentage: gameState.winPercentage, remainingCartelas: TOTAL_CARTELAS - totalCartelas });
+    res.json({ 
+        success: true, 
+        totalSelectedCartelas: totalCartelas, 
+        totalBetAmount, 
+        winnerReward, 
+        winPercentage: gameState.winPercentage, 
+        remainingCartelas: TOTAL_CARTELAS - totalCartelas 
+    });
 });
 
-app.get("/health", (req, res) => { res.json({ status: "OK" }); });
+app.get("/health", (req, res) => { 
+    res.json({ status: "OK", timestamp: new Date().toISOString() }); 
+});
 
 // ==================== SOCKET.IO AUTHENTICATION ====================
 io.on("connection", (socket) => {
@@ -869,44 +1158,104 @@ io.on("connection", (socket) => {
             socket.emit("error", { message: "Authentication token required" });
             return;
         }
+        
         try {
             const result = await callBotAPI("/api/verify-token", { token });
             if (!result.valid) {
                 socket.emit("error", { message: "Invalid or expired token" });
                 return;
             }
+            
             const { telegram_id, username, balance } = result;
-            if (!activeSessions.has(telegram_id)) activeSessions.set(telegram_id, new Set());
+            
+            // Track session for multi-device support
+            if (!activeSessions.has(telegram_id)) {
+                activeSessions.set(telegram_id, new Set());
+            }
             activeSessions.get(telegram_id).add(socket.id);
+            
+            // Check for existing player
             let existingPlayer = null;
-            for (const [sid, p] of gameState.players) if (p.telegramId === telegram_id) { existingPlayer = p; break; }
+            for (const [sid, p] of gameState.players) {
+                if (p.telegramId === telegram_id) {
+                    existingPlayer = p;
+                    break;
+                }
+            }
+            
             let playerData;
             if (existingPlayer) {
-                playerData = { socketId: socket.id, telegramId: telegram_id, username, balance,
-                    selectedCartelas: existingPlayer.selectedCartelas, totalWon: existingPlayer.totalWon, totalPlayed: existingPlayer.totalPlayed, gamesWon: existingPlayer.gamesWon };
+                playerData = { 
+                    socketId: socket.id, 
+                    telegramId: telegram_id, 
+                    username, 
+                    balance,
+                    selectedCartelas: existingPlayer.selectedCartelas, 
+                    totalWon: existingPlayer.totalWon, 
+                    totalPlayed: existingPlayer.totalPlayed, 
+                    gamesWon: existingPlayer.gamesWon 
+                };
                 gameState.players.set(socket.id, playerData);
             } else {
+                // Load saved selections from current round
                 let savedSelections = [];
                 for (const [cartela, { telegramId: tid }] of globalTakenCartelas.entries()) {
                     if (tid === telegram_id) savedSelections.push(cartela);
                 }
-                playerData = { socketId: socket.id, telegramId: telegram_id, username, balance,
-                    selectedCartelas: savedSelections, totalWon: 0, totalPlayed: 0, gamesWon: 0 };
+                playerData = { 
+                    socketId: socket.id, 
+                    telegramId: telegram_id, 
+                    username, 
+                    balance,
+                    selectedCartelas: savedSelections, 
+                    totalWon: 0, 
+                    totalPlayed: 0, 
+                    gamesWon: 0 
+                };
                 gameState.players.set(socket.id, playerData);
             }
-            socket.emit("authenticated", { success: true, username, balance, selectedCartelas: playerData.selectedCartelas });
-            socket.emit("gameState", {
-                status: gameState.status, round: gameState.round, timer: gameState.timer,
-                drawnNumbers: gameState.drawnNumbers, playersCount: gameState.players.size, winPercentage: gameState.winPercentage
+            
+            // Send authentication success
+            socket.emit("authenticated", { 
+                success: true, 
+                user: { telegram_id, username, balance },
+                selectedCartelas: playerData.selectedCartelas 
             });
-            socket.emit("timerUpdate", { seconds: gameState.timer, formatted: formatTime(gameState.timer) });
+            
+            // Send current game state
+            socket.emit("gameState", {
+                status: gameState.status,
+                round: gameState.round,
+                timer: gameState.timer,
+                drawnNumbers: gameState.drawnNumbers,
+                playersCount: gameState.players.size,
+                winPercentage: gameState.winPercentage,
+                totalBet: gameState.totalBet,
+                winnerReward: gameState.winnerReward
+            });
+            
+            socket.emit("timerUpdate", { 
+                seconds: gameState.timer, 
+                formatted: formatTime(gameState.timer),
+                phase: gameState.status
+            });
+            
+            // Send current balance
+            socket.emit("balanceUpdated", { balance, canPlay: balance >= BET_AMOUNT });
+            
             broadcastRewardPool();
+            
+            // Update players list for all
             io.emit("playersUpdate", {
                 count: gameState.players.size,
                 players: Array.from(gameState.players.values()).map(p => ({
-                    socketId: p.socketId, username: p.username, selectedCount: p.selectedCartelas.length, balance: p.balance
+                    socketId: p.socketId,
+                    username: p.username,
+                    selectedCount: p.selectedCartelas.length,
+                    balance: p.balance
                 }))
             });
+            
         } catch (err) {
             console.error("Authentication error:", err);
             socket.emit("error", { message: "Authentication service unavailable" });
@@ -918,99 +1267,178 @@ io.on("connection", (socket) => {
             const player = gameState.players.get(socket.id);
             if (!player) throw new Error("Not authenticated");
             if (gameState.status !== "selection") throw new Error(`Cannot select now (${gameState.status})`);
-            if (player.selectedCartelas.length >= MAX_CARTELAS) throw new Error(`Max ${MAX_CARTELAS} cartelas`);
-            if (player.selectedCartelas.includes(data.cartelaNumber)) throw new Error("Already selected");
+            if (player.selectedCartelas.length >= MAX_CARTELAS) throw new Error(`Max ${MAX_CARTELAS} cartelas per player`);
+            if (player.selectedCartelas.includes(data.cartelaId)) throw new Error("Already selected");
             if (player.balance < BET_AMOUNT) throw new Error(`Insufficient balance: ${player.balance} ETB`);
-            if (!isCartelaAvailable(data.cartelaNumber)) {
-                const takenBy = globalTakenCartelas.get(data.cartelaNumber);
-                throw new Error(`❌ Cartela ${data.cartelaNumber} already taken by ${takenBy.username}`);
+            if (!isCartelaAvailable(data.cartelaId)) {
+                const takenBy = globalTakenCartelas.get(data.cartelaId);
+                throw new Error(`❌ Cartela ${data.cartelaId} already taken by ${takenBy.username}`);
             }
+            
+            // Deduct balance via bot API
             const deductResult = await callBotAPI("/api/deduct", {
                 telegram_id: player.telegramId,
                 amount: BET_AMOUNT,
-                reason: `cartela ${data.cartelaNumber} round ${gameState.round}`
+                cartela_id: data.cartelaId,
+                round: gameState.round
             });
-            if (!deductResult.success) throw new Error(deductResult.message || "Balance deduction failed");
+            
+            if (!deductResult.success) throw new Error(deductResult.error || "Balance deduction failed");
+            
             player.balance = deductResult.new_balance;
-            const reserved = await reserveCartela(data.cartelaNumber, player.telegramId, player.username);
+            
+            // Reserve cartela
+            const reserved = await reserveCartela(data.cartelaId, player.telegramId, player.username);
             if (!reserved) throw new Error("Cartela just taken by someone else");
-            player.selectedCartelas.push(data.cartelaNumber);
-            await logGameTransaction(player.telegramId, player.username, "bet", BET_AMOUNT, data.cartelaNumber, gameState.round, "Cartela selection");
+            
+            player.selectedCartelas.push(data.cartelaId);
+            
+            // Log transaction
+            await logGameTransaction(player.telegramId, player.username, "bet", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela selection");
+            
             const selectionData = {
-                cartela: data.cartelaNumber,
+                cartelaId: data.cartelaId,
                 selectedCount: player.selectedCartelas.length,
                 selectedCartelas: player.selectedCartelas,
                 balance: player.balance,
                 remainingSlots: MAX_CARTELAS - player.selectedCartelas.length
             };
+            
             socket.emit("selectionConfirmed", selectionData);
             broadcastToUserDevices(player.telegramId, "selectionConfirmed", selectionData, socket.id);
             broadcastRewardPool();
+            
             io.emit("cartelaTaken", {
-                cartelaNumber: data.cartelaNumber, takenBy: player.username,
-                remainingCartelas: TOTAL_CARTELAS - globalTotalSelectedCartelas, totalSelected: globalTotalSelectedCartelas
+                cartelaId: data.cartelaId,
+                username: player.username,
+                telegramId: player.telegramId,
+                remainingCartelas: TOTAL_CARTELAS - globalTotalSelectedCartelas,
+                totalSelected: globalTotalSelectedCartelas
             });
+            
             broadcastGameState();
-            io.emit("playersUpdate", {
-                count: gameState.players.size,
-                players: Array.from(gameState.players.values()).map(p => ({
-                    socketId: p.socketId, username: p.username, selectedCount: p.selectedCartelas.length, balance: p.balance
-                }))
-            });
+            
             if (callback) callback({ success: true, newBalance: player.balance });
+            
         } catch (err) {
+            console.error("Select cartela error:", err);
             if (callback) callback({ success: false, error: err.message });
             else socket.emit("error", { message: err.message });
         }
     });
 
     socket.on("deselectCartela", async (data) => {
-        const player = gameState.players.get(socket.id);
-        if (!player) return;
-        if (gameState.status !== "selection") return socket.emit("error", { message: "Cannot deselect now" });
-        const idx = player.selectedCartelas.indexOf(data.cartelaNumber);
-        if (idx !== -1) {
-            const released = await releaseCartela(data.cartelaNumber, player.telegramId);
-            if (released) {
-                player.selectedCartelas.splice(idx, 1);
-                const refundResult = await callBotAPI("/api/add", {
-                    telegram_id: player.telegramId,
-                    amount: BET_AMOUNT,
-                    reason: `deselected cartela ${data.cartelaNumber}`
-                });
-                if (refundResult.success) player.balance = refundResult.new_balance;
-                await logGameTransaction(player.telegramId, player.username, "refund", BET_AMOUNT, data.cartelaNumber, gameState.round, "Cartela deselected");
-                const updateData = { selectedCartelas: player.selectedCartelas, balance: player.balance };
-                socket.emit("selectionUpdated", updateData);
-                broadcastToUserDevices(player.telegramId, "selectionUpdated", updateData, socket.id);
-                broadcastRewardPool();
-                io.emit("cartelaReleased", {
-                    cartelaNumber: data.cartelaNumber, releasedBy: player.username,
-                    availableCartelas: TOTAL_CARTELAS - globalTotalSelectedCartelas, totalSelected: globalTotalSelectedCartelas
-                });
-                broadcastGameState();
+        try {
+            const player = gameState.players.get(socket.id);
+            if (!player) return;
+            if (gameState.status !== "selection") {
+                socket.emit("error", { message: "Cannot deselect now" });
+                return;
             }
+            
+            const idx = player.selectedCartelas.indexOf(data.cartelaId);
+            if (idx !== -1) {
+                const released = await releaseCartela(data.cartelaId, player.telegramId);
+                if (released) {
+                    player.selectedCartelas.splice(idx, 1);
+                    
+                    // Refund balance
+                    const refundResult = await callBotAPI("/api/add", {
+                        telegram_id: player.telegramId,
+                        amount: BET_AMOUNT,
+                        reason: `deselected cartela ${data.cartelaId}`
+                    });
+                    
+                    if (refundResult.success) {
+                        player.balance = refundResult.new_balance;
+                    }
+                    
+                    await logGameTransaction(player.telegramId, player.username, "refund", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela deselected");
+                    
+                    const updateData = { 
+                        selectedCartelas: player.selectedCartelas, 
+                        balance: player.balance 
+                    };
+                    
+                    socket.emit("selectionUpdated", updateData);
+                    broadcastToUserDevices(player.telegramId, "selectionUpdated", updateData, socket.id);
+                    broadcastRewardPool();
+                    
+                    io.emit("cartelaReleased", {
+                        cartelaId: data.cartelaId,
+                        releasedBy: player.username,
+                        availableCartelas: TOTAL_CARTELAS - globalTotalSelectedCartelas,
+                        totalSelected: globalTotalSelectedCartelas
+                    });
+                    
+                    broadcastGameState();
+                }
+            }
+        } catch (err) {
+            console.error("Deselect cartela error:", err);
+            socket.emit("error", { message: err.message });
         }
     });
 
-    socket.on("getStatus", () => {
+    socket.on("checkBalance", async (data, callback) => {
+        try {
+            const player = gameState.players.get(socket.id);
+            if (!player) throw new Error("Not authenticated");
+            
+            const result = await callBotAPI("/api/balance", { telegram_id: player.telegramId });
+            if (result.success) {
+                player.balance = result.balance;
+                socket.emit("balanceUpdated", { balance: player.balance, canPlay: player.balance >= BET_AMOUNT });
+                if (callback) callback({ success: true, balance: player.balance });
+            }
+        } catch (err) {
+            if (callback) callback({ success: false, error: err.message });
+        }
+    });
+
+    socket.on("getGameStatus", (callback) => {
+        if (callback) {
+            callback({
+                status: gameState.status,
+                round: gameState.round,
+                timer: gameState.timer,
+                drawnNumbers: gameState.drawnNumbers,
+                winPercentage: gameState.winPercentage,
+                totalBet: gameState.totalBet,
+                winnerReward: gameState.winnerReward
+            });
+        }
+    });
+
+    socket.on("getPlayerStatus", (callback) => {
         const player = gameState.players.get(socket.id);
-        if (player) socket.emit("playerStatus", {
-            balance: player.balance, selectedCartelas: player.selectedCartelas,
-            gameStatus: gameState.status, timer: gameState.timer, round: gameState.round,
-            drawnNumbers: gameState.drawnNumbers, totalWon: player.totalWon,
-            totalPlayed: player.totalPlayed, gamesWon: player.gamesWon,
-            winPercentage: gameState.winPercentage
-        });
+        if (player && callback) {
+            callback({
+                balance: player.balance,
+                selectedCartelas: player.selectedCartelas,
+                gameStatus: gameState.status,
+                timer: gameState.timer,
+                round: gameState.round,
+                drawnNumbers: gameState.drawnNumbers
+            });
+        }
     });
 
     socket.on("getCartelaGrid", (data, callback) => {
         const grid = getCartelaGrid(data.cartelaId);
-        if (callback) callback({ success: true, cartelaId: data.cartelaId, grid });
-        else socket.emit("cartelaGrid", { cartelaId: data.cartelaId, grid });
+        if (callback) {
+            callback({ success: true, cartelaId: data.cartelaId, grid });
+        }
+    });
+
+    socket.on("ping", (callback) => {
+        if (callback) callback({ serverTime: Date.now() });
     });
 
     socket.on("disconnect", () => {
+        console.log(`🔴 Socket disconnected: ${socket.id}`);
+        
+        // Remove from active sessions
         let telegramToRemove = null;
         for (const [tid, sessions] of activeSessions) {
             if (sessions.has(socket.id)) {
@@ -1020,15 +1448,23 @@ io.on("connection", (socket) => {
             }
         }
         if (telegramToRemove) activeSessions.delete(telegramToRemove);
+        
+        // Remove player if no other sessions
         const player = gameState.players.get(socket.id);
         if (player) {
             const hasOtherSessions = activeSessions.has(player.telegramId);
             if (!hasOtherSessions) {
-                for (const [cnum, cart] of globalTakenCartelas) if (cart.telegramId === player.telegramId) globalTakenCartelas.delete(cnum);
+                // Release all cartelas held by this player
+                for (const [cnum, cart] of globalTakenCartelas) {
+                    if (cart.telegramId === player.telegramId) {
+                        globalTakenCartelas.delete(cnum);
+                    }
+                }
                 globalTotalSelectedCartelas = globalTakenCartelas.size;
                 gameState.players.delete(socket.id);
             }
         }
+        
         broadcastRewardPool();
         broadcastGameState();
     });
@@ -1044,6 +1480,7 @@ async function gracefulShutdown() {
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 10000);
 }
+
 process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
 
@@ -1054,21 +1491,31 @@ async function startServer() {
     setTimeout(() => recoverFromCrash(), 2000);
     startSelectionTimer();
     
-    const PORT = process.env.PORT || 3000;
+    const PLAYER_URL = process.env.PLAYER_URL || "https://estif-bingo-advanced-1.onrender.com/player.html";
+    const ADMIN_URL = process.env.ADMIN_URL || "https://estif-bingo-advanced-1.onrender.com/admin.html";
+    
     server.listen(PORT, () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (1000 CARTELAS) 🎲    ║
-║     📱 Player: https://estif-bingo-advanced-1.onrender.com/player.html    ║
-║     🔐 Admin:  https://estif-bingo-advanced-1.onrender.com/admin.html     ║
+║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (${TOTAL_CARTELAS} CARTELAS) 🎲    ║
+║                                                                           ║
+║     ✅ MAX CARTELAS PER PLAYER: ${MAX_CARTELAS}                                           ║
+║     ✅ BET AMOUNT: ${BET_AMOUNT} ETB                                           ║
+║     ✅ SELECTION TIME: ${SELECTION_TIME} seconds                                         ║
+║     ✅ DRAW INTERVAL: ${DRAW_INTERVAL/1000} seconds                                          ║
+║                                                                           ║
+║     📱 Player: ${PLAYER_URL}    ║
+║     🔐 Admin:  ${ADMIN_URL}     ║
+║                                                                           ║
 ║     ✅ Commission adjustable (70/75/76/80) via admin panel                ║
 ║     ✅ Sound packs served from /public/sounds/                            ║
 ║     ✅ Full Telegram bot integration                                      ║
-║     ✅ Automated migrations (run on startup)                              ║
-║     ✅ 1000 unique cartelas (1-1000)                                      ║
+║     ✅ ${TOTAL_CARTELAS} unique cartelas loaded from JSON                        ║
+║     ✅ Multi-device sync support                                          ║
+║     ✅ Crash recovery with active_round_selections                        ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
         `);
-    });
+    }); 
 }
 
 startServer().catch(console.error);

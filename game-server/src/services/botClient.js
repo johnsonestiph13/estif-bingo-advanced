@@ -1,13 +1,12 @@
 // game-server/src/services/botClient.js
 
-const fetch = require("node-fetch");
 const { config } = require("../config");
 
 // ==================== CONFIGURATION ====================
 
 const BOT_API_URL = config.BOT_API_URL;
 const API_SECRET = config.API_SECRET;
-const TIMEOUT = config.BOT_API_TIMEOUT || 5000;
+const TIMEOUT = config.BOT_API_TIMEOUT || 10000;
 const MAX_RETRIES = config.BOT_API_RETRIES || 3;
 const RETRY_DELAY = 1000; // 1 second base delay
 
@@ -48,7 +47,7 @@ async function makeRequest(endpoint, method = "POST", body = null, retries = MAX
             const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.message || `HTTP ${response.status}: ${response.statusText}`);
+                throw new Error(data.message || data.error || `HTTP ${response.status}: ${response.statusText}`);
             }
             
             return data;
@@ -90,7 +89,7 @@ async function getRequest(endpoint, retries = MAX_RETRIES) {
             const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.message || `HTTP ${response.status}: ${response.statusText}`);
+                throw new Error(data.message || data.error || `HTTP ${response.status}: ${response.statusText}`);
             }
             
             return data;
@@ -108,6 +107,80 @@ async function getRequest(endpoint, retries = MAX_RETRIES) {
     throw new Error(`Failed after ${retries} attempts: ${lastError.message}`);
 }
 
+// ==================== CIRCUIT BREAKER ====================
+
+/**
+ * Circuit breaker state
+ */
+let circuitState = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
+let failureCount = 0;
+let lastFailureTime = 0;
+const FAILURE_THRESHOLD = 5;
+const OPEN_TIMEOUT = 30000; // 30 seconds
+
+/**
+ * Circuit breaker wrapper for bot API calls
+ * Prevents cascading failures when bot is down
+ */
+async function withCircuitBreaker(operation, operationName = "unknown") {
+    // Check if circuit is open
+    if (circuitState === "OPEN") {
+        const now = Date.now();
+        if (now - lastFailureTime > OPEN_TIMEOUT) {
+            circuitState = "HALF_OPEN";
+            console.log(`🔌 Circuit breaker for ${operationName} is HALF_OPEN, testing...`);
+        } else {
+            throw new Error(`Bot API circuit breaker is OPEN for ${operationName}`);
+        }
+    }
+    
+    try {
+        const result = await operation();
+        
+        // Success - close circuit if half-open
+        if (circuitState === "HALF_OPEN") {
+            circuitState = "CLOSED";
+            failureCount = 0;
+            console.log(`✅ Circuit breaker for ${operationName} closed (healthy)`);
+        }
+        
+        return result;
+    } catch (err) {
+        failureCount++;
+        lastFailureTime = Date.now();
+        
+        if (failureCount >= FAILURE_THRESHOLD) {
+            circuitState = "OPEN";
+            console.error(`🔴 Circuit breaker for ${operationName} OPEN after ${failureCount} failures`);
+        }
+        
+        throw err;
+    }
+}
+
+/**
+ * Reset circuit breaker
+ */
+function resetCircuitBreaker() {
+    circuitState = "CLOSED";
+    failureCount = 0;
+    lastFailureTime = 0;
+    console.log("🔄 Circuit breaker reset to CLOSED state");
+}
+
+/**
+ * Get circuit breaker status
+ */
+function getCircuitBreakerStatus() {
+    return {
+        state: circuitState,
+        failureCount: failureCount,
+        lastFailureTime: lastFailureTime,
+        failureThreshold: FAILURE_THRESHOLD,
+        openTimeoutMs: OPEN_TIMEOUT
+    };
+}
+
 // ==================== AUTHENTICATION ENDPOINTS ====================
 
 /**
@@ -116,39 +189,32 @@ async function getRequest(endpoint, retries = MAX_RETRIES) {
  * @returns {Promise<{valid: boolean, telegram_id?: number, username?: string, balance?: number}>}
  */
 async function verifyToken(token) {
-    try {
+    return withCircuitBreaker(async () => {
         const data = await makeRequest("/api/verify-token", "POST", { token });
         return {
-            valid: data.valid,
+            valid: data.valid || false,
             telegram_id: data.telegram_id,
             username: data.username,
             balance: data.balance
         };
-    } catch (err) {
-        console.error("Token verification failed:", err);
-        return { valid: false, error: err.message };
-    }
+    }, "verifyToken");
 }
 
 /**
  * Exchange a one-time code for a JWT token
  * @param {string} code - One-time code from bot
- * @returns {Promise<{success: boolean, token?: string, telegram_id?: number, username?: string, balance?: number}>}
+ * @returns {Promise<{success: boolean, token?: string, user?: object, error?: string}>}
  */
 async function exchangeCode(code) {
-    try {
+    return withCircuitBreaker(async () => {
         const data = await makeRequest("/api/exchange-code", "POST", { code });
         return {
-            success: data.success,
+            success: data.success || false,
             token: data.token,
-            telegram_id: data.telegram_id,
-            username: data.username,
-            balance: data.balance
+            user: data.user,
+            error: data.error
         };
-    } catch (err) {
-        console.error("Code exchange failed:", err);
-        return { success: false, error: err.message };
-    }
+    }, "exchangeCode");
 }
 
 // ==================== BALANCE MANAGEMENT ENDPOINTS ====================
@@ -158,107 +224,124 @@ async function exchangeCode(code) {
  * @param {number} telegramId - User's Telegram ID
  * @param {number} amount - Amount to deduct
  * @param {string} reason - Reason for deduction
- * @returns {Promise<{success: boolean, new_balance?: number, message?: string}>}
+ * @param {number} cartelaId - Optional cartela ID
+ * @param {number} round - Optional round number
+ * @returns {Promise<{success: boolean, new_balance?: number, error?: string}>}
  */
-async function deductBalance(telegramId, amount, reason = "") {
-    try {
-        const data = await makeRequest("/api/deduct", "POST", {
+async function deductBalance(telegramId, amount, reason = "", cartelaId = null, round = null) {
+    return withCircuitBreaker(async () => {
+        const payload = {
             telegram_id: telegramId,
-            amount,
-            reason
-        });
-        return {
-            success: data.success,
-            new_balance: data.new_balance,
-            message: data.message
+            amount: amount,
+            reason: reason
         };
-    } catch (err) {
-        console.error(`Balance deduction failed for user ${telegramId}:`, err);
-        return { success: false, error: err.message };
-    }
+        if (cartelaId) payload.cartela_id = cartelaId;
+        if (round) payload.round = round;
+        
+        const data = await makeRequest("/api/deduct", "POST", payload);
+        return {
+            success: data.success || false,
+            new_balance: data.new_balance,
+            error: data.error
+        };
+    }, "deductBalance");
 }
 
 /**
- * Add balance to a user
+ * Add balance to a user (winning)
  * @param {number} telegramId - User's Telegram ID
  * @param {number} amount - Amount to add
  * @param {string} reason - Reason for addition
- * @returns {Promise<{success: boolean, new_balance?: number, message?: string}>}
+ * @param {number} roundId - Optional round ID
+ * @returns {Promise<{success: boolean, new_balance?: number, error?: string}>}
  */
-async function addBalance(telegramId, amount, reason = "") {
-    try {
-        const data = await makeRequest("/api/add", "POST", {
+async function addBalance(telegramId, amount, reason = "", roundId = null) {
+    return withCircuitBreaker(async () => {
+        const payload = {
             telegram_id: telegramId,
-            amount,
-            reason
-        });
-        return {
-            success: data.success,
-            new_balance: data.new_balance,
-            message: data.message
+            amount: amount,
+            reason: reason
         };
-    } catch (err) {
-        console.error(`Balance addition failed for user ${telegramId}:`, err);
-        return { success: false, error: err.message };
-    }
+        if (roundId) payload.round_id = roundId;
+        
+        const data = await makeRequest("/api/add", "POST", payload);
+        return {
+            success: data.success || false,
+            new_balance: data.new_balance,
+            error: data.error
+        };
+    }, "addBalance");
 }
 
 /**
  * Get user's current balance
  * @param {number} telegramId - User's Telegram ID
- * @returns {Promise<{success: boolean, balance?: number, message?: string}>}
+ * @returns {Promise<{success: boolean, balance?: number, canPlay?: boolean, error?: string}>}
  */
 async function getUserBalance(telegramId) {
-    try {
-        const data = await makeRequest("/api/get-balance", "POST", {
-            telegram_id: telegramId
+    return withCircuitBreaker(async () => {
+        const data = await getRequest(`/api/balance/${telegramId}`);
+        return {
+            success: data.success || false,
+            balance: data.balance,
+            canPlay: data.canPlay || (data.balance >= 10),
+            error: data.error
+        };
+    }, "getUserBalance");
+}
+
+/**
+ * Adjust balance (admin action)
+ * @param {number} telegramId - User's Telegram ID
+ * @param {number} amount - Amount to adjust (positive or negative)
+ * @param {string} reason - Reason for adjustment
+ * @returns {Promise<{success: boolean, new_balance?: number, error?: string}>}
+ */
+async function adjustBalance(telegramId, amount, reason = "Admin adjustment") {
+    return withCircuitBreaker(async () => {
+        const data = await makeRequest("/api/adjust-balance", "POST", {
+            telegram_id: telegramId,
+            amount: amount,
+            reason: reason
         });
         return {
-            success: data.success,
-            balance: data.balance,
-            message: data.message
+            success: data.success || false,
+            new_balance: data.new_balance,
+            error: data.error
         };
-    } catch (err) {
-        console.error(`Get balance failed for user ${telegramId}:`, err);
-        return { success: false, error: err.message };
-    }
+    }, "adjustBalance");
 }
 
 // ==================== COMMISSION / WIN PERCENTAGE ENDPOINTS ====================
 
 /**
  * Get current win percentage from bot
- * @returns {Promise<{success: boolean, percentage?: number, message?: string}>}
+ * @returns {Promise<{success: boolean, percentage?: number, error?: string}>}
  */
 async function getWinPercentage() {
-    try {
+    return withCircuitBreaker(async () => {
         const data = await getRequest("/api/commission");
         return {
             success: true,
-            percentage: data.percentage
+            percentage: data.percentage || 75
         };
-    } catch (err) {
-        console.error("Get win percentage failed:", err);
-        return { success: false, error: err.message };
-    }
+    }, "getWinPercentage");
 }
 
 /**
  * Set win percentage in bot
  * @param {number} percentage - Win percentage (70, 75, 76, or 80)
- * @returns {Promise<{success: boolean, message?: string}>}
+ * @returns {Promise<{success: boolean, message?: string, error?: string}>}
  */
 async function setWinPercentage(percentage) {
-    try {
+    return withCircuitBreaker(async () => {
         const data = await makeRequest("/api/commission", "POST", { percentage });
         return {
-            success: data.success,
-            message: data.message
+            success: data.success || false,
+            message: data.message,
+            error: data.error
         };
-    } catch (err) {
-        console.error(`Set win percentage to ${percentage}% failed:`, err);
-        return { success: false, error: err.message };
-    }
+    }, "setWinPercentage");
 }
 
 // ==================== USER INFO ENDPOINTS ====================
@@ -266,22 +349,66 @@ async function setWinPercentage(percentage) {
 /**
  * Get user information from bot
  * @param {number} telegramId - User's Telegram ID
- * @returns {Promise<{success: boolean, user?: object, message?: string}>}
+ * @returns {Promise<{success: boolean, user?: object, error?: string}>}
  */
 async function getUserInfo(telegramId) {
-    try {
-        const data = await makeRequest("/api/get-user", "POST", {
-            telegram_id: telegramId
-        });
+    return withCircuitBreaker(async () => {
+        const data = await getRequest(`/api/get-user/${telegramId}`);
         return {
-            success: data.success,
+            success: data.success || false,
             user: data.user,
-            message: data.message
+            error: data.error
         };
-    } catch (err) {
-        console.error(`Get user info failed for user ${telegramId}:`, err);
-        return { success: false, error: err.message };
-    }
+    }, "getUserInfo");
+}
+
+/**
+ * Search players by username or phone
+ * @param {string} searchTerm - Search term
+ * @returns {Promise<{success: boolean, players?: Array, error?: string}>}
+ */
+async function searchPlayers(searchTerm) {
+    return withCircuitBreaker(async () => {
+        const data = await makeRequest("/api/search-players", "POST", { search: searchTerm });
+        return {
+            success: data.success || false,
+            players: data.players,
+            error: data.error
+        };
+    }, "searchPlayers");
+}
+
+/**
+ * Get player stats
+ * @param {number} telegramId - User's Telegram ID
+ * @returns {Promise<{success: boolean, stats?: object, error?: string}>}
+ */
+async function getPlayerStats(telegramId) {
+    return withCircuitBreaker(async () => {
+        const data = await getRequest(`/api/player-stats/${telegramId}`);
+        return {
+            success: data.success || false,
+            stats: data.stats,
+            error: data.error
+        };
+    }, "getPlayerStats");
+}
+
+// ==================== ROUND MANAGEMENT ENDPOINTS ====================
+
+/**
+ * Save round result to bot database
+ * @param {object} roundData - Round data to save
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function saveRoundResult(roundData) {
+    return withCircuitBreaker(async () => {
+        const data = await makeRequest("/api/save-round", "POST", roundData);
+        return {
+            success: data.success || false,
+            error: data.error
+        };
+    }, "saveRoundResult");
 }
 
 // ==================== HEALTH CHECK ====================
@@ -305,7 +432,7 @@ async function healthCheck() {
 
 /**
  * Get bot API status with details
- * @returns {Promise<{healthy: boolean, status?: string, uptime?: number, timestamp?: string}>}
+ * @returns {Promise<{healthy: boolean, status?: string, uptime?: number, timestamp?: string, circuitBreaker?: object}>}
  */
 async function getBotStatus() {
     try {
@@ -320,13 +447,23 @@ async function getBotStatus() {
                 healthy: true,
                 status: data.status || "ok",
                 uptime: data.uptime,
-                timestamp: data.timestamp
+                timestamp: data.timestamp,
+                circuitBreaker: getCircuitBreakerStatus()
             };
         }
         
-        return { healthy: false, status: "unhealthy" };
+        return { 
+            healthy: false, 
+            status: "unhealthy",
+            circuitBreaker: getCircuitBreakerStatus()
+        };
     } catch (err) {
-        return { healthy: false, status: "unreachable", error: err.message };
+        return { 
+            healthy: false, 
+            status: "unreachable", 
+            error: err.message,
+            circuitBreaker: getCircuitBreakerStatus()
+        };
     }
 }
 
@@ -415,61 +552,17 @@ async function withRetry(operation, maxRetries = MAX_RETRIES) {
     throw lastError;
 }
 
-/**
- * Circuit breaker state
- */
-let circuitState = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
-let failureCount = 0;
-let lastFailureTime = 0;
-const FAILURE_THRESHOLD = 5;
-const OPEN_TIMEOUT = 30000; // 30 seconds
-
-/**
- * Circuit breaker wrapper for bot API calls
- * Prevents cascading failures when bot is down
- */
-async function withCircuitBreaker(operation, operationName = "unknown") {
-    // Check if circuit is open
-    if (circuitState === "OPEN") {
-        const now = Date.now();
-        if (now - lastFailureTime > OPEN_TIMEOUT) {
-            circuitState = "HALF_OPEN";
-            console.log(`🔌 Circuit breaker for ${operationName} is HALF_OPEN, testing...`);
-        } else {
-            throw new Error(`Bot API circuit breaker is OPEN for ${operationName}`);
-        }
-    }
-    
-    try {
-        const result = await operation();
-        
-        // Success - close circuit if half-open
-        if (circuitState === "HALF_OPEN") {
-            circuitState = "CLOSED";
-            failureCount = 0;
-            console.log(`✅ Circuit breaker for ${operationName} closed (healthy)`);
-        }
-        
-        return result;
-    } catch (err) {
-        failureCount++;
-        lastFailureTime = Date.now();
-        
-        if (failureCount >= FAILURE_THRESHOLD) {
-            circuitState = "OPEN";
-            console.error(`🔴 Circuit breaker for ${operationName} OPEN after ${failureCount} failures`);
-        }
-        
-        throw err;
-    }
-}
-
 // ==================== EXPORTS ====================
 
 module.exports = {
     // Core methods
     makeRequest,
     getRequest,
+    
+    // Circuit breaker
+    withCircuitBreaker,
+    resetCircuitBreaker,
+    getCircuitBreakerStatus,
     
     // Authentication
     verifyToken,
@@ -479,6 +572,7 @@ module.exports = {
     deductBalance,
     addBalance,
     getUserBalance,
+    adjustBalance,
     
     // Commission
     getWinPercentage,
@@ -486,6 +580,11 @@ module.exports = {
     
     // User info
     getUserInfo,
+    searchPlayers,
+    getPlayerStats,
+    
+    // Round management
+    saveRoundResult,
     
     // Health
     healthCheck,
@@ -497,7 +596,6 @@ module.exports = {
     
     // Utilities
     withRetry,
-    withCircuitBreaker,
     
     // Configuration (exposed for debugging)
     BOT_API_URL,

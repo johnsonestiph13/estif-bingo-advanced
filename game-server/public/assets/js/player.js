@@ -1,331 +1,925 @@
-// assets/js/player.js - Main Player Game Logic
+// Estif Bingo 24/7 - Player Module
+// Updated to support string-based cartela IDs (B1_001, O15_188, etc.)
 
-// ==================== GLOBALS ====================
-let gameState = {
-    status: 'selection',
-    round: 1,
-    timer: 50,
-    drawnNumbers: [],
-    players: [],
-    totalBet: 0,
-    winnerReward: 0,
-    winPercentage: 75,
-    myBalance: 0,
-    myUsername: '',
-    mySelectedCartelas: [],
-    myTelegramId: null
+// Configuration
+const CONFIG = {
+    CARTELA_PRICE: 10,
+    MAX_CARTELAS: 4,
+    SELECTION_TIME: 50,
+    DRAW_INTERVAL: 4000,
+    BOT_API_URL: 'https://estif-bingo-bot-1.onrender.com',
+    WS_URL: window.location.origin,
+    BALANCE_CHECK_INTERVAL: 3000, // Check balance every 3 seconds
+    TOTAL_CARTELAS: 75, // 75 cartela types (B1-B15, I16-I30, N31-N45, G46-G60, O61-O75)
+    TOTAL_VARIATIONS: 1000 // Total cartela variations
 };
 
-// DOM Elements
-let balanceEl, roundEl, poolEl, winPercentEl, playersCountEl, timerEl, statusEl;
-let cartelasContainer, drawnNumbersContainer, playersListContainer;
+// Global State
+let socket = null;
+let userData = null;
+let selectedCartelas = new Map(); // cartelaId -> { element, grid, selectedAt }
+let cartelasData = {}; // Store loaded cartela grids
+let gameState = {
+    status: 'selection', // selection, active, pause
+    round: 1,
+    timer: 50,
+    numbersDrawn: [],
+    winners: [],
+    poolAmount: 0,
+    winPercentage: 75,
+    canPlay: false,
+    balance: 0
+};
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', async () => {
-    // Get DOM elements
-    balanceEl = document.getElementById('balance');
-    roundEl = document.getElementById('round');
-    poolEl = document.getElementById('pool');
-    winPercentEl = document.getElementById('winPercent');
-    playersCountEl = document.getElementById('playersCount');
-    timerEl = document.getElementById('timer');
-    statusEl = document.getElementById('statusMsg');
-    cartelasContainer = document.getElementById('cartelasContainer');
-    drawnNumbersContainer = document.getElementById('drawnNumbersList');
-    playersListContainer = document.getElementById('playersList');
+let sounds = {};
+let currentSoundPack = localStorage.getItem('soundPack') || 'pack1';
+let audioContext = null;
+
+// BINGO letter ranges
+const BINGO_RANGES = {
+    'B': { min: 1, max: 15, letter: 'B' },
+    'I': { min: 16, max: 30, letter: 'I' },
+    'N': { min: 31, max: 45, letter: 'N' },
+    'G': { min: 46, max: 60, letter: 'G' },
+    'O': { min: 61, max: 75, letter: 'O' }
+};
+
+// Generate all cartela IDs (75 types)
+function generateAllCartelaIds() {
+    const ids = [];
+    // B: 1-15
+    for (let i = 1; i <= 15; i++) ids.push(`B${i}`);
+    // I: 16-30
+    for (let i = 16; i <= 30; i++) ids.push(`I${i}`);
+    // N: 31-45
+    for (let i = 31; i <= 45; i++) ids.push(`N${i}`);
+    // G: 46-60
+    for (let i = 46; i <= 60; i++) ids.push(`G${i}`);
+    // O: 61-75
+    for (let i = 61; i <= 75; i++) ids.push(`O${i}`);
+    return ids;
+}
+
+const ALL_CARTELA_IDS = generateAllCartelaIds();
+
+// Initialize Game
+async function initGame() {
+    showLoading();
     
-    // Get token from URL
-    const token = getQueryParam('token');
-    const code = getQueryParam('code');
+    // Get auth code from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
     
-    if (!token && !code) {
-        document.getElementById('app').innerHTML = '<div class="error-box">❌ Access denied. Please use the Telegram bot to play.</div>';
+    if (!code) {
+        showError('No authentication code found. Please use the Play button in Telegram.');
         return;
     }
     
-    // Exchange code for token if needed
-    if (code && !token) {
-        await exchangeCodeForToken(code);
-    } else if (token) {
-        gameState.authToken = token;
-    }
-    
-    // Preload sound
-    soundManager.preload();
-    
-    // Initialize socket connection
-    socketManager.connect();
-    setupSocketEvents();
-    
-    // Authenticate
-    socketManager.authenticate(gameState.authToken);
-});
-
-// ==================== TOKEN EXCHANGE ====================
-async function exchangeCodeForToken(code) {
     try {
+        // Authenticate with game server
         const response = await fetch('/api/exchange-code', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code })
+            body: JSON.stringify({ code: code })
         });
+        
         const data = await response.json();
-        if (data.success && data.token) {
-            gameState.authToken = data.token;
-            // Clean URL
-            window.history.replaceState({}, '', window.location.pathname);
-        } else {
-            throw new Error(data.message || 'Code exchange failed');
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Authentication failed');
         }
-    } catch (err) {
-        showMessage(`Authentication failed: ${err.message}`, 'error');
-        document.getElementById('app').innerHTML = `<div class="error-box">❌ ${err.message}</div>`;
+        
+        userData = data.user;
+        gameState.balance = userData.balance;
+        gameState.canPlay = userData.balance >= CONFIG.CARTELA_PRICE;
+        
+        // Initialize sounds
+        await initSounds();
+        
+        // Load cartelas data
+        await loadCartelasData();
+        
+        // Connect WebSocket
+        connectWebSocket(data.token);
+        
+        // Start balance checker
+        startBalanceChecker();
+        
+        // Render cartelas
+        renderCartelas();
+        
+        // Update UI
+        updateUI();
+        
+        hideLoading();
+        
+    } catch (error) {
+        console.error('Init error:', error);
+        showError('Failed to initialize game. Please try again.');
     }
 }
 
-// ==================== SOCKET EVENTS ====================
-function setupSocketEvents() {
-    // Authentication response
-    socketManager.on('authenticated', (data) => {
-        gameState.myUsername = data.username;
-        gameState.myBalance = data.balance;
-        gameState.mySelectedCartelas = data.selectedCartelas || [];
-        gameState.myTelegramId = data.telegramId;
-        
-        updateBalanceUI(gameState.myBalance);
-        cartelaManager.selectedCartelas = gameState.mySelectedCartelas;
-        cartelaManager.render();
-        
-        statusEl.innerText = '✅ Connected! Game active';
-    });
-    
-    // Game state update
-    socketManager.on('gameState', (state) => {
-        gameState.status = state.status;
-        gameState.round = state.round;
-        gameState.timer = state.timer;
-        gameState.winPercentage = state.winPercentage;
-        gameState.totalBet = state.totalBet;
-        gameState.winnerReward = state.winnerReward;
-        
-        roundEl.innerText = state.round;
-        winPercentEl.innerText = `${state.winPercentage}%`;
-        poolEl.innerText = state.totalBet.toFixed(2);
-        
-        statusEl.innerText = state.status === 'selection' ? '🎲 SELECTION PHASE - Pick cartelas!' : 
-                            (state.status === 'active' ? '🎯 GAME ACTIVE' : '🏁 Round ended');
-        
-        if (state.players) updatePlayersUI(state.players);
-        cartelaManager.updateAvailability(gameState.myBalance, gameState.status);
-    });
-    
-    // Timer update
-    socketManager.on('timerUpdate', (data) => {
-        gameState.timer = data.seconds;
-        timerEl.innerText = formatTime(data.seconds);
-        
-        const timerBox = document.getElementById('timerBox');
-        if (data.seconds <= 10 && data.seconds > 0) {
-            timerBox.classList.add('warning');
-            if (data.seconds === 10) soundManager.playCountdown();
-        } else {
-            timerBox.classList.remove('warning');
+// Load cartelas data from server
+async function loadCartelasData() {
+    try {
+        // Load a sample cartela to get the structure
+        const response = await fetch('/api/cartela/B1');
+        if (response.ok) {
+            const data = await response.json();
+            console.log('Cartela data loaded successfully');
         }
+    } catch (error) {
+        console.warn('Failed to preload cartelas:', error);
+    }
+}
+
+// WebSocket Connection
+function connectWebSocket(token) {
+    socket = io(CONFIG.WS_URL, {
+        transports: ['websocket'],
+        auth: { token: token }
     });
     
-    // Reward pool update
-    socketManager.on('rewardPoolUpdate', (data) => {
-        poolEl.innerText = data.totalBetAmount.toFixed(2);
-        winPercentEl.innerText = `${data.winPercentage}%`;
+    socket.on('connect', () => {
+        console.log('WebSocket connected');
+        socket.emit('authenticate', { token: token });
     });
     
-    // Selection confirmed
-    socketManager.on('selectionConfirmed', (data) => {
-        gameState.mySelectedCartelas = data.selectedCartelas;
-        gameState.myBalance = data.balance;
-        updateBalanceUI(gameState.myBalance);
-        cartelaManager.selectedCartelas = gameState.mySelectedCartelas;
-        cartelaManager.render();
-        showMessage(`✅ Cartela ${data.cartela} selected! Remaining slots: ${data.remainingSlots}`, 'success', 1200);
-        soundManager.playSelect();
-    });
-    
-    // Selection updated (deselect)
-    socketManager.on('selectionUpdated', (data) => {
-        gameState.mySelectedCartelas = data.selectedCartelas;
-        gameState.myBalance = data.balance;
-        updateBalanceUI(gameState.myBalance);
-        cartelaManager.selectedCartelas = gameState.mySelectedCartelas;
-        cartelaManager.render();
-    });
-    
-    // Cartela taken by someone else
-    socketManager.on('cartelaTaken', (data) => {
-        showMessage(`⚠️ Cartela ${data.cartelaNumber} taken by ${data.takenBy}`, 'warning', 2000);
-        cartelaManager.render();
-    });
-    
-    // Cartela released
-    socketManager.on('cartelaReleased', (data) => {
-        showMessage(`📢 Cartela ${data.cartelaNumber} released by ${data.releasedBy}`, 'info', 1500);
-        cartelaManager.render();
-    });
-    
-    // Number drawn
-    socketManager.on('numberDrawn', (data) => {
-        gameState.drawnNumbers.push(data.number);
-        updateDrawnNumbersUI(gameState.drawnNumbers);
-        soundManager.playNumber(data.number);
-    });
-    
-    // Game started
-    socketManager.on('gameStarted', (data) => {
-        gameState.drawnNumbers = [];
-        updateDrawnNumbersUI([]);
-        showMessage(data.message, 'success', 4000);
-        gameState.status = 'active';
-        cartelaManager.updateAvailability(gameState.myBalance, 'active');
-    });
-    
-    // Round ended
-    socketManager.on('roundEnded', (data) => {
-        showMessage(data.message, 'success', 5000);
-        gameState.status = 'ended';
-        cartelaManager.updateAvailability(gameState.myBalance, 'ended');
-    });
-    
-    // You won!
-    socketManager.on('youWon', (data) => {
-        gameState.myBalance = data.newBalance;
-        updateBalanceUI(gameState.myBalance);
-        showMessage(`🎉🎉 YOU WON ${data.amount.toFixed(2)} ETB! 🎉🎉`, 'success', 8000);
-        soundManager.playWin();
-        
-        if (data.cartelaId && data.winningLines) {
-            showMessage(`🏆 Winning cartela #${data.cartelaId} - Lines: ${data.winningLines.join(', ')}`, 'success', 6000);
+    socket.on('authenticated', (data) => {
+        console.log('Authenticated:', data);
+        if (data.selectedCartelas) {
+            data.selectedCartelas.forEach(cartelaId => {
+                selectedCartelas.set(cartelaId, { selectedAt: Date.now() });
+            });
+            updateCartelaCount();
+            updateCartelaSelectionsUI();
         }
-        
-        // Add winner glow effect
-        document.body.classList.add('winner-glow');
-        setTimeout(() => document.body.classList.remove('winner-glow'), 1000);
+        updateUI();
     });
     
-    // Next round
-    socketManager.on('nextRound', (data) => {
-        gameState.mySelectedCartelas = [];
-        gameState.drawnNumbers = [];
-        updateDrawnNumbersUI([]);
-        cartelaManager.selectedCartelas = [];
-        cartelaManager.render();
-        gameState.status = 'selection';
+    socket.on('balanceUpdate', (data) => {
+        gameState.balance = data.balance;
+        gameState.canPlay = data.canPlay;
+        updateUI();
+        updateCartelaAvailability();
+    });
+    
+    socket.on('newRound', (data) => {
         gameState.round = data.round;
-        roundEl.innerText = data.round;
-        showMessage(data.message, 'info', 3000);
-        cartelaManager.updateAvailability(gameState.myBalance, 'selection');
+        gameState.status = 'selection';
+        gameState.timer = data.timer;
+        gameState.numbersDrawn = [];
+        gameState.winners = [];
+        gameState.winPercentage = data.winPercentage;
+        
+        // Clear selections
+        selectedCartelas.clear();
+        updateCartelaSelectionsUI();
+        updateCartelaCount();
+        
+        updateUI();
+        playSound('newRound');
+        showNotification(`Round ${data.round} started! Select up to ${CONFIG.MAX_CARTELAS} cartelas.`, 'info');
     });
     
-    // Players update
-    socketManager.on('playersUpdate', (data) => {
-        updatePlayersUI(data.players);
-        playersCountEl.innerText = data.count;
+    socket.on('timerUpdate', (data) => {
+        gameState.timer = data.timer;
+        updateTimerDisplay(data.phase);
+        
+        // Play countdown tick for last 10 seconds
+        if (data.phase === 'selection' && data.timer <= 10 && data.timer > 0) {
+            if (data.timer === 10 || data.timer === 5 || data.timer === 3) {
+                playSound('countdown');
+            }
+            blinkTimer();
+        }
     });
     
-    // Balance updated (from admin or other devices)
-    socketManager.on('balanceUpdated', (data) => {
-        if (data.added) {
-            gameState.myBalance = data.balance;
-            updateBalanceUI(gameState.myBalance);
-            showMessage(`💰 Balance increased by ${data.added.toFixed(2)} ETB`, 'success', 2000);
-        } else if (data.removed) {
-            gameState.myBalance = data.balance;
-            updateBalanceUI(gameState.myBalance);
-            showMessage(`💸 Balance decreased by ${data.removed.toFixed(2)} ETB`, 'warning', 2000);
+    socket.on('cartelaTaken', (data) => {
+        const cartelaElement = document.querySelector(`.cartela-card[data-id="${data.cartelaId}"]`);
+        if (cartelaElement && data.telegramId !== userData?.telegram_id) {
+            cartelaElement.classList.add('taken');
+            const btn = cartelaElement.querySelector('.select-cartela-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Taken';
+            }
+        }
+    });
+    
+    socket.on('cartelaReleased', (data) => {
+        const cartelaElement = document.querySelector(`.cartela-card[data-id="${data.cartelaId}"]`);
+        if (cartelaElement && !selectedCartelas.has(data.cartelaId)) {
+            cartelaElement.classList.remove('taken');
+            const btn = cartelaElement.querySelector('.select-cartela-btn');
+            if (btn && gameState.status === 'selection' && gameState.canPlay) {
+                btn.disabled = false;
+                btn.textContent = 'Select';
+            }
+        }
+    });
+    
+    socket.on('selectionConfirmed', (data) => {
+        gameState.balance = data.balance;
+        updateUI();
+        updateCartelaSelectionsUI();
+        updateCartelaCount();
+        playSound('select');
+    });
+    
+    socket.on('selectionUpdated', (data) => {
+        gameState.balance = data.balance;
+        updateUI();
+        updateCartelaSelectionsUI();
+        updateCartelaCount();
+    });
+    
+    socket.on('numberDrawn', (data) => {
+        gameState.numbersDrawn = data.numbers;
+        updateNumberDisplay(data.number);
+        markNumbersOnCartelas(data.number);
+        playSound(`number_${data.number}`);
+    });
+    
+    socket.on('gameActive', (data) => {
+        gameState.status = 'active';
+        updateUI();
+        showNotification('🎲 Game Started! Numbers are being drawn...', 'info');
+    });
+    
+    socket.on('roundEnded', (data) => {
+        gameState.status = 'pause';
+        gameState.winners = data.winners;
+        gameState.timer = 6;
+        
+        showWinners(data);
+        if (data.winners.some(w => w.username === userData?.username)) {
+            playSound('win');
+            playSound('celebration');
         } else {
-            gameState.myBalance = data.balance;
-            updateBalanceUI(gameState.myBalance);
+            playSound('win');
         }
-        cartelaManager.updateAvailability(gameState.myBalance, gameState.status);
+        updateUI();
     });
     
-    // State sync (multi-device)
-    socketManager.on('stateSync', (data) => {
-        gameState.myBalance = data.balance;
-        gameState.mySelectedCartelas = data.selectedCartelas;
-        updateBalanceUI(gameState.myBalance);
-        cartelaManager.selectedCartelas = gameState.mySelectedCartelas;
-        cartelaManager.render();
-        showMessage('🔄 Synced with other device', 'info', 2000);
+    socket.on('youWon', (data) => {
+        gameState.balance = data.newBalance;
+        updateUI();
+        showWinNotification(data);
+        playSound('win');
+        playSound('celebration');
+        
+        // Highlight winning cartela
+        highlightWinningCartela(data.cartelaId);
     });
     
-    // Error
-    socketManager.on('error', (err) => {
-        showMessage(`⚠️ ${err.message}`, 'error', 3000);
+    socket.on('error', (data) => {
+        showError(data.message);
+    });
+    
+    socket.on('disconnect', () => {
+        updateConnectionStatus(false);
+        showError('Disconnected from server. Reconnecting...');
+        setTimeout(() => connectWebSocket(token), 3000);
+    });
+    
+    socket.on('connect', () => {
+        updateConnectionStatus(true);
     });
 }
 
-// ==================== UI UPDATE FUNCTIONS ====================
-function updateBalanceUI(balance) {
-    gameState.myBalance = balance;
-    balanceEl.innerText = balance.toFixed(2);
+// Render Cartelas (75 types with variations)
+function renderCartelas() {
+    const container = document.getElementById('cartelasContainer');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Use CSS Grid for responsive layout
+    container.style.display = 'grid';
+    container.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 250px))';
+    container.style.gap = '15px';
+    container.style.padding = '20px';
+    container.style.justifyContent = 'center';
+    
+    // Render only cartela types (not all variations)
+    for (const cartelaId of ALL_CARTELA_IDS) {
+        const cartela = createCartelaElement(cartelaId);
+        container.appendChild(cartela);
+    }
 }
 
-function updateDrawnNumbersUI(numbers) {
-    drawnNumbersContainer.innerHTML = '';
-    numbers.forEach(num => {
-        const ball = document.createElement('div');
-        ball.className = 'number-ball';
-        ball.innerText = num;
-        drawnNumbersContainer.appendChild(ball);
-    });
-    drawnNumbersContainer.scrollTop = drawnNumbersContainer.scrollHeight;
+// Create individual cartela element
+function createCartelaElement(cartelaId) {
+    const div = document.createElement('div');
+    div.className = 'cartela-card';
+    div.setAttribute('data-id', cartelaId);
+    
+    // Get BINGO letter
+    const letter = cartelaId.charAt(0);
+    const letterColor = getBingoColor(letter);
+    
+    div.innerHTML = `
+        <div class="cartela-header" style="border-left-color: ${letterColor}">
+            <span class="cartela-bingo-letter" style="background: ${letterColor}">${letter}</span>
+            <span class="cartela-id">${cartelaId}</span>
+            <span class="cartela-price">${CONFIG.CARTELA_PRICE} ETB</span>
+        </div>
+        <div class="cartela-preview-grid" id="preview-${cartelaId}">
+            <div class="preview-skeleton">
+                <div class="skeleton-row">
+                    <span>B</span><span>I</span><span>N</span><span>G</span><span>O</span>
+                </div>
+                <div class="skeleton-numbers">
+                    ${Array(5).fill().map(() => '<div class="skeleton-line">???</div>').join('')}
+                </div>
+            </div>
+        </div>
+        <div class="cartela-footer">
+            <button class="select-cartela-btn" data-cartela="${cartelaId}">
+                Select Cartela
+            </button>
+        </div>
+    `;
+    
+    // Add click handler to button
+    const btn = div.querySelector('.select-cartela-btn');
+    btn.onclick = (e) => {
+        e.stopPropagation();
+        selectCartela(cartelaId);
+    };
+    
+    // Check if cartela is already selected
+    if (selectedCartelas.has(cartelaId)) {
+        div.classList.add('selected');
+        btn.textContent = 'Selected';
+        btn.disabled = true;
+    }
+    
+    // Lazy load grid preview on hover
+    div.onmouseenter = () => loadCartelaPreview(cartelaId);
+    
+    return div;
 }
 
-function updatePlayersUI(players) {
-    playersListContainer.innerHTML = '';
-    players.forEach(p => {
-        const badge = document.createElement('div');
-        badge.className = 'player-badge';
-        badge.innerText = `${p.username} (${p.selectedCount})`;
-        playersListContainer.appendChild(badge);
-    });
+// Load cartela preview grid
+async function loadCartelaPreview(cartelaId) {
+    const previewContainer = document.getElementById(`preview-${cartelaId}`);
+    if (!previewContainer || previewContainer.dataset.loaded === 'true') return;
+    
+    try {
+        const response = await fetch(`/api/cartela/${cartelaId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.grid) {
+                previewContainer.innerHTML = generateCartelaGridHTML(data.grid);
+                previewContainer.dataset.loaded = 'true';
+            }
+        }
+    } catch (error) {
+        console.warn(`Failed to load preview for ${cartelaId}:`, error);
+    }
 }
 
-// ==================== CARTELA ACTIONS ====================
-function onCartelaSelect(cartelaId) {
+// Generate cartela grid HTML
+function generateCartelaGridHTML(grid) {
+    if (!grid) return '<div class="preview-error">⚠️</div>';
+    
+    let html = '<div class="cartela-grid">';
+    html += '<div class="grid-row header-row">';
+    html += '<span>B</span><span>I</span><span>N</span><span>G</span><span>O</span>';
+    html += '</div>';
+    
+    for (let row = 0; row < 5; row++) {
+        html += '<div class="grid-row">';
+        for (let col = 0; col < 5; col++) {
+            const value = grid[row][col];
+            const isFree = (value === 0 || value === 'FREE');
+            const displayValue = isFree ? 'FREE' : value;
+            html += `<div class="${isFree ? 'free-space' : 'number'}" data-number="${value}">${displayValue}</div>`;
+        }
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+// Select cartela
+async function selectCartela(cartelaId) {
+    // Validation
     if (gameState.status !== 'selection') {
-        showMessage('⏳ Cannot select now, wait for next round', 'warning', 1500);
-        return false;
+        showError('Cannot select cartela now. Wait for next round.');
+        return;
     }
     
-    if (gameState.myBalance < 10) {
-        showMessage(`⚠️ Insufficient balance: ${gameState.myBalance} ETB`, 'warning', 1500);
-        return false;
+    if (selectedCartelas.has(cartelaId)) {
+        showError('Cartela already selected');
+        return;
     }
     
-    socketManager.selectCartela(cartelaId, (response) => {
-        if (!response.success) {
-            showMessage(response.error, 'error', 2000);
+    if (selectedCartelas.size >= CONFIG.MAX_CARTELAS) {
+        showError(`Maximum ${CONFIG.MAX_CARTELAS} cartelas per player`);
+        return;
+    }
+    
+    if (!gameState.canPlay || gameState.balance < CONFIG.CARTELA_PRICE) {
+        showError('Insufficient balance. Please deposit to play.');
+        return;
+    }
+    
+    // Send selection to server
+    socket.emit('selectCartela', { 
+        cartelaId: cartelaId,
+        price: CONFIG.CARTELA_PRICE 
+    }, (response) => {
+        if (response && response.success) {
+            // Optimistic UI update
+            selectedCartelas.set(cartelaId, { selectedAt: Date.now() });
+            updateCartelaSelectionsUI();
+            updateCartelaCount();
+            playSound('select');
+        } else if (response && response.error) {
+            showError(response.error);
         }
     });
-    return true;
 }
 
-function onCartelaDeselect(cartelaId) {
-    if (gameState.status !== 'selection') {
-        showMessage('⏳ Cannot deselect now', 'warning', 1500);
-        return false;
+// Update cartela selections UI
+function updateCartelaSelectionsUI() {
+    document.querySelectorAll('.cartela-card').forEach(card => {
+        const cartelaId = card.getAttribute('data-id');
+        const btn = card.querySelector('.select-cartela-btn');
+        
+        if (selectedCartelas.has(cartelaId)) {
+            card.classList.add('selected');
+            if (btn) {
+                btn.textContent = 'Selected';
+                btn.disabled = true;
+            }
+        } else {
+            card.classList.remove('selected');
+            if (btn && gameState.status === 'selection' && gameState.canPlay && !card.classList.contains('taken')) {
+                btn.disabled = false;
+                btn.textContent = 'Select Cartela';
+            } else if (btn && !gameState.canPlay) {
+                btn.disabled = true;
+            }
+        }
+    });
+}
+
+// Update cartela availability based on balance
+function updateCartelaAvailability() {
+    const canSelect = gameState.canPlay && gameState.status === 'selection' 
+                      && selectedCartelas.size < CONFIG.MAX_CARTELAS;
+    
+    document.querySelectorAll('.cartela-card').forEach(card => {
+        const cartelaId = card.getAttribute('data-id');
+        const btn = card.querySelector('.select-cartela-btn');
+        
+        if (!selectedCartelas.has(cartelaId) && !card.classList.contains('taken')) {
+            if (btn) {
+                btn.disabled = !canSelect;
+                btn.style.opacity = canSelect ? '1' : '0.5';
+            }
+        }
+    });
+}
+
+// Get BINGO color
+function getBingoColor(letter) {
+    const colors = {
+        'B': '#ff6b6b',
+        'I': '#4ecdc4',
+        'N': '#45b7d1',
+        'G': '#96ceb4',
+        'O': '#ffeaa7'
+    };
+    return colors[letter] || '#ddd';
+}
+
+// Get BINGO letter for number
+function getNumberLetter(number) {
+    if (number <= 15) return 'B';
+    if (number <= 30) return 'I';
+    if (number <= 45) return 'N';
+    if (number <= 60) return 'G';
+    return 'O';
+}
+
+// Update number display with animation
+function updateNumberDisplay(number) {
+    const container = document.getElementById('currentNumber');
+    if (!container) return;
+    
+    const letter = getNumberLetter(number);
+    
+    container.innerHTML = `
+        <div class="bingo-ball animate">
+            <span class="bingo-ball-letter">${letter}</span>
+            <span class="bingo-ball-number">${number}</span>
+        </div>
+    `;
+    
+    // Add to history
+    const historyContainer = document.getElementById('numbersHistory');
+    if (historyContainer) {
+        const numberSpan = document.createElement('span');
+        numberSpan.className = 'history-number';
+        numberSpan.textContent = number;
+        historyContainer.prepend(numberSpan);
+        
+        // Keep only last 20 numbers
+        while (historyContainer.children.length > 20) {
+            historyContainer.removeChild(historyContainer.lastChild);
+        }
     }
-    socketManager.deselectCartela(cartelaId);
-    return true;
 }
 
-// ==================== INITIALIZE CARTELA MANAGER ====================
-cartelaManager.init('cartelasContainer', onCartelaSelect, onCartelaDeselect);
-cartelaManager.maxPerPlayer = 2;
-cartelaManager.selectedCartelas = gameState.mySelectedCartelas;
+// Mark numbers on cartelas
+function markNumbersOnCartelas(number) {
+    const visibleCartelas = document.querySelectorAll('.cartela-card');
+    visibleCartelas.forEach(cartela => {
+        const numberElements = cartela.querySelectorAll(`.number[data-number="${number}"]`);
+        numberElements.forEach(el => {
+            el.classList.add('marked');
+            el.style.background = '#4caf50';
+            el.style.color = 'white';
+        });
+    });
+}
 
-// ==================== EXPOSE FOR DEBUG ====================
-window.gameState = gameState;
-window.socketManager = socketManager;
-window.cartelaManager = cartelaManager;
-window.soundManager = soundManager;
+// Timer display with color change
+function updateTimerDisplay(phase) {
+    const timerElement = document.getElementById('timer');
+    if (!timerElement) return;
+    
+    timerElement.textContent = gameState.timer;
+    
+    if (phase === 'selection') {
+        if (gameState.timer <= 10) {
+            timerElement.style.color = '#ff4444';
+            timerElement.style.animation = 'blink 0.5s infinite';
+        } else {
+            timerElement.style.color = '#ffd700';
+            timerElement.style.animation = 'none';
+        }
+    }
+}
+
+// Blink timer effect
+function blinkTimer() {
+    const timerElement = document.getElementById('timer');
+    if (timerElement && gameState.timer <= 10 && gameState.timer > 0) {
+        timerElement.classList.add('blinking');
+    } else if (timerElement) {
+        timerElement.classList.remove('blinking');
+    }
+}
+
+// Show winners and winning patterns
+function showWinners(data) {
+    const winnersContainer = document.getElementById('winnersDisplay');
+    if (!winnersContainer) return;
+    
+    winnersContainer.style.display = 'block';
+    
+    if (data.winners.length === 0) {
+        winnersContainer.innerHTML = '<div class="no-winner">😢 No winners this round!</div>';
+        return;
+    }
+    
+    winnersContainer.innerHTML = `
+        <div class="winners-list">
+            <h3>🏆 Winners 🏆</h3>
+            ${data.winners.map(winner => `
+                <div class="winner-card">
+                    <div class="winner-info">
+                        <strong>${escapeHtml(winner.username || 'Player')}</strong>
+                        <span>Cartela: ${winner.cartelaId}</span>
+                        <span class="winning-pattern">${winner.pattern || winner.winningLines?.join(', ')}</span>
+                        <span class="winning-amount">+${data.prizePerWinner.toFixed(2)} ETB</span>
+                    </div>
+                </div>
+            `).join('')}
+            <div class="round-stats">
+                <div>💰 Total Prize: ${data.totalPrize.toFixed(2)} ETB</div>
+                <div>📊 Commission: ${data.commission.toFixed(2)} ETB</div>
+            </div>
+        </div>
+    `;
+    
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+        if (winnersContainer) {
+            winnersContainer.style.display = 'none';
+        }
+    }, 10000);
+}
+
+// Highlight winning cartela
+function highlightWinningCartela(cartelaId) {
+    const cartelaElement = document.querySelector(`.cartela-card[data-id="${cartelaId}"]`);
+    if (cartelaElement) {
+        cartelaElement.classList.add('winner-highlight');
+        cartelaElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+            cartelaElement.classList.remove('winner-highlight');
+        }, 5000);
+    }
+}
+
+// Start balance checker (every 3 seconds)
+function startBalanceChecker() {
+    setInterval(async () => {
+        if (socket && socket.connected && userData) {
+            socket.emit('checkBalance', { telegram_id: userData.telegram_id });
+        }
+    }, CONFIG.BALANCE_CHECK_INTERVAL);
+}
+
+// Update connection status
+function updateConnectionStatus(connected) {
+    const statusEl = document.getElementById('connectionStatus');
+    if (statusEl) {
+        statusEl.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+    }
+}
+
+// Initialize sounds
+async function initSounds() {
+    const soundFiles = {
+        select: 'select.mp3',
+        win: 'win.mp3',
+        newRound: 'newRound.mp3',
+        countdown: 'countdown.mp3',
+        celebration: 'celebration.mp3'
+    };
+    
+    // Load number sounds 1-75
+    for (let i = 1; i <= 75; i++) {
+        const audio = new Audio(`/sounds/${currentSoundPack}/${i}.mp3`);
+        audio.preload = 'auto';
+        sounds[`number_${i}`] = audio;
+    }
+    
+    // Load effect sounds
+    for (const [key, file] of Object.entries(soundFiles)) {
+        const audio = new Audio(`/sounds/${currentSoundPack}/${file}`);
+        audio.preload = 'auto';
+        sounds[key] = audio;
+    }
+}
+
+// Play sound
+function playSound(soundName) {
+    const soundEnabled = localStorage.getItem('soundEnabled') !== 'false';
+    if (!soundEnabled) return;
+    
+    const sound = sounds[soundName];
+    if (sound) {
+        sound.currentTime = 0;
+        sound.play().catch(e => console.log('Sound play error:', e));
+    }
+}
+
+// Show notification
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.innerHTML = `<div class="notification-message">${message}</div>`;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.classList.add('fade-out');
+        setTimeout(() => notification.remove(), 500);
+    }, 3000);
+}
+
+function showWinNotification(data) {
+    showNotification(`🎉 YOU WON! 🎉\n+${data.amount.toFixed(2)} ETB\nPattern: ${data.pattern || 'BINGO!'}`, 'success');
+}
+
+function showError(message) {
+    showNotification(message, 'error');
+}
+
+// Update UI elements
+function updateUI() {
+    // Update balance display
+    const balanceElement = document.getElementById('balance');
+    if (balanceElement) {
+        balanceElement.textContent = `${gameState.balance.toFixed(2)} ETB`;
+        if (gameState.balance < CONFIG.CARTELA_PRICE) {
+            balanceElement.classList.add('balance-negative');
+        } else {
+            balanceElement.classList.remove('balance-negative');
+        }
+    }
+    
+    // Update round display
+    const roundElement = document.getElementById('round');
+    if (roundElement) {
+        roundElement.textContent = gameState.round;
+    }
+    
+    // Update pool amount
+    const poolElement = document.getElementById('poolAmount');
+    if (poolElement) {
+        poolElement.textContent = `${gameState.poolAmount.toFixed(2)} ETB`;
+    }
+    
+    // Update win percentage
+    const winPercentElement = document.getElementById('winPercentage');
+    if (winPercentElement) {
+        winPercentElement.textContent = `${gameState.winPercentage}%`;
+    }
+    
+    // Update status
+    const statusElement = document.getElementById('gameStatus');
+    if (statusElement) {
+        let statusText = '';
+        switch(gameState.status) {
+            case 'selection':
+                statusText = '🎯 SELECTION PHASE - Choose your cartelas!';
+                break;
+            case 'active':
+                statusText = '🎲 GAME ACTIVE - Numbers being drawn!';
+                break;
+            case 'pause':
+                statusText = '⏸️ NEXT ROUND STARTING SOON...';
+                break;
+        }
+        statusElement.textContent = statusText;
+    }
+    
+    // Update watch-only mode
+    const watchOnlyMessage = document.getElementById('watchOnlyMessage');
+    if (watchOnlyMessage) {
+        watchOnlyMessage.style.display = gameState.canPlay ? 'none' : 'block';
+    }
+    
+    // Update cartela availability
+    updateCartelaAvailability();
+}
+
+function updateCartelaCount() {
+    const countElement = document.getElementById('selectedCount');
+    if (countElement) {
+        countElement.textContent = `${selectedCartelas.size}/${CONFIG.MAX_CARTELAS}`;
+    }
+}
+
+// Loading state
+function showLoading() {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) loader.style.display = 'flex';
+}
+
+function hideLoading() {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) loader.style.display = 'none';
+}
+
+// Escape HTML
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    initGame();
+    
+    // Initialize sound controls
+    const soundToggleBtn = document.getElementById('soundToggleBtn');
+    if (soundToggleBtn) {
+        soundToggleBtn.addEventListener('click', () => {
+            const enabled = localStorage.getItem('soundEnabled') !== 'false';
+            localStorage.setItem('soundEnabled', !enabled);
+            soundToggleBtn.textContent = !enabled ? '🔊 Sound On' : '🔇 Sound Off';
+        });
+    }
+    
+    const soundPackSelect = document.getElementById('soundPackSelect');
+    if (soundPackSelect) {
+        soundPackSelect.addEventListener('change', (e) => {
+            currentSoundPack = e.target.value;
+            localStorage.setItem('soundPack', currentSoundPack);
+            initSounds();
+            playSound('select');
+        });
+        soundPackSelect.value = localStorage.getItem('soundPack') || 'pack1';
+    }
+    
+    // Add CSS animations
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .blinking {
+            animation: blink 0.5s infinite;
+            color: #ff4444 !important;
+            font-weight: bold;
+        }
+        .bingo-ball {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #fff, #ffd700);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .bingo-ball.animate {
+            animation: pulse 0.5s ease-out;
+        }
+        .bingo-ball-letter {
+            font-size: 24px;
+            font-weight: bold;
+            color: #e94560;
+        }
+        .bingo-ball-number {
+            font-size: 36px;
+            font-weight: bold;
+            color: #1a1a2e;
+        }
+        .winner-cartela {
+            animation: pulse 1s infinite;
+            border: 3px solid gold !important;
+            box-shadow: 0 0 20px gold !important;
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1e1e2f;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            max-width: 300px;
+            white-space: pre-line;
+        }
+        .notification.success {
+            background: linear-gradient(135deg, #00b09b, #96c93d);
+        }
+        .notification.error {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+        }
+        .notification.info {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .fade-out {
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .connection-status {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            z-index: 1000;
+        }
+        .connection-status.connected {
+            background: #4caf50;
+            box-shadow: 0 0 5px #4caf50;
+        }
+        .connection-status.disconnected {
+            background: #f44336;
+            box-shadow: 0 0 5px #f44336;
+        }
+        .cartela-card.winner-highlight {
+            animation: winnerPulse 0.5s 3;
+            border: 3px solid gold !important;
+        }
+        @keyframes winnerPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+    `;
+    document.head.appendChild(style);
+});

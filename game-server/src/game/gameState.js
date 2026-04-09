@@ -21,8 +21,8 @@ let gameState = {
     gameActive: false
 };
 
-// Cartela tracking
-let globalTakenCartelas = new Map();     // cartelaNumber -> { telegramId, username, timestamp }
+// Cartela tracking - UPDATED: using string cartela IDs
+let globalTakenCartelas = new Map();     // cartelaId (string) -> { telegramId, username, timestamp }
 let globalTotalSelectedCartelas = 0;
 
 // Session tracking
@@ -110,10 +110,10 @@ function updatePlayerBalance(socketId, newBalance) {
 /**
  * Add selected cartela to player
  */
-function addPlayerCartela(socketId, cartelaNumber) {
+function addPlayerCartela(socketId, cartelaId) {
     const player = gameState.players.get(socketId);
-    if (player && !player.selectedCartelas.includes(cartelaNumber)) {
-        player.selectedCartelas.push(cartelaNumber);
+    if (player && !player.selectedCartelas.includes(cartelaId)) {
+        player.selectedCartelas.push(cartelaId);
         return true;
     }
     return false;
@@ -122,10 +122,10 @@ function addPlayerCartela(socketId, cartelaNumber) {
 /**
  * Remove selected cartela from player
  */
-function removePlayerCartela(socketId, cartelaNumber) {
+function removePlayerCartela(socketId, cartelaId) {
     const player = gameState.players.get(socketId);
     if (player) {
-        const index = player.selectedCartelas.indexOf(cartelaNumber);
+        const index = player.selectedCartelas.indexOf(cartelaId);
         if (index !== -1) {
             player.selectedCartelas.splice(index, 1);
             return true;
@@ -157,16 +157,19 @@ function incrementPlayerStats(socketId, winAmount = 0) {
     }
 }
 
-// ==================== CARTELA MANAGEMENT ====================
+// ==================== CARTELA MANAGEMENT (String IDs) ====================
 
 /**
  * Reserve a cartela for a player
+ * @param {string} cartelaId - Cartela ID like "B1_001"
+ * @param {number} telegramId - User's Telegram ID
+ * @param {string} username - User's username
  */
-function reserveCartela(cartelaNumber, telegramId, username) {
-    if (globalTakenCartelas.has(cartelaNumber)) {
+function reserveCartela(cartelaId, telegramId, username) {
+    if (globalTakenCartelas.has(cartelaId)) {
         return false;
     }
-    globalTakenCartelas.set(cartelaNumber, {
+    globalTakenCartelas.set(cartelaId, {
         telegramId,
         username,
         timestamp: Date.now()
@@ -177,11 +180,13 @@ function reserveCartela(cartelaNumber, telegramId, username) {
 
 /**
  * Release a cartela reservation
+ * @param {string} cartelaId - Cartela ID like "B1_001"
+ * @param {number} telegramId - User's Telegram ID
  */
-function releaseCartela(cartelaNumber, telegramId) {
-    const cartela = globalTakenCartelas.get(cartelaNumber);
+function releaseCartela(cartelaId, telegramId) {
+    const cartela = globalTakenCartelas.get(cartelaId);
     if (cartela && cartela.telegramId === telegramId) {
-        globalTakenCartelas.delete(cartelaNumber);
+        globalTakenCartelas.delete(cartelaId);
         globalTotalSelectedCartelas = globalTakenCartelas.size;
         return true;
     }
@@ -190,27 +195,44 @@ function releaseCartela(cartelaNumber, telegramId) {
 
 /**
  * Check if cartela is available
+ * @param {string} cartelaId - Cartela ID like "B1_001"
  */
-function isCartelaAvailable(cartelaNumber) {
-    return !globalTakenCartelas.has(cartelaNumber);
+function isCartelaAvailable(cartelaId) {
+    return !globalTakenCartelas.has(cartelaId);
 }
 
 /**
  * Get cartela owner info
+ * @param {string} cartelaId - Cartela ID like "B1_001"
  */
-function getCartelaOwner(cartelaNumber) {
-    return globalTakenCartelas.get(cartelaNumber);
+function getCartelaOwner(cartelaId) {
+    return globalTakenCartelas.get(cartelaId);
 }
 
 /**
  * Get all reserved cartelas
  */
 function getAllReservedCartelas() {
-    return Array.from(globalTakenCartelas.entries()).map(([number, data]) => ({
-        cartelaNumber: number,
+    return Array.from(globalTakenCartelas.entries()).map(([id, data]) => ({
+        cartelaId: id,
         telegramId: data.telegramId,
-        username: data.username
+        username: data.username,
+        timestamp: data.timestamp
     }));
+}
+
+/**
+ * Get reserved cartelas by user
+ * @param {number} telegramId - User's Telegram ID
+ */
+function getReservedCartelasByUser(telegramId) {
+    const userCartelas = [];
+    for (const [cartelaId, data] of globalTakenCartelas) {
+        if (data.telegramId === telegramId) {
+            userCartelas.push(cartelaId);
+        }
+    }
+    return userCartelas;
 }
 
 /**
@@ -270,6 +292,17 @@ function getUserSessions(telegramId) {
     return sessions ? Array.from(sessions) : [];
 }
 
+/**
+ * Get all active sessions (for debugging)
+ */
+function getAllActiveSessions() {
+    const sessions = {};
+    for (const [telegramId, socketSet] of activeSessions) {
+        sessions[telegramId] = Array.from(socketSet);
+    }
+    return sessions;
+}
+
 // ==================== GAME STATE SETTERS/GETTERS ====================
 
 function getGameState() {
@@ -324,6 +357,41 @@ function setRoundStartTime(time) {
 
 function setRoundEndTime(time) {
     gameState.roundEndTime = time;
+}
+
+/**
+ * Get current round number
+ */
+function getCurrentRound() {
+    return gameState.round;
+}
+
+/**
+ * Get current game status
+ */
+function getCurrentStatus() {
+    return gameState.status;
+}
+
+/**
+ * Get current timer value
+ */
+function getCurrentTimer() {
+    return gameState.timer;
+}
+
+/**
+ * Get drawn numbers
+ */
+function getDrawnNumbers() {
+    return [...gameState.drawnNumbers];
+}
+
+/**
+ * Get winners from current round
+ */
+function getCurrentWinners() {
+    return [...gameState.winners];
 }
 
 // ==================== TIMER MANAGEMENT ====================
@@ -393,6 +461,34 @@ function getActivePlayersCount() {
     return Array.from(gameState.players.values()).filter(p => p.selectedCartelas.length > 0).length;
 }
 
+/**
+ * Get total bet amount for current round
+ */
+function getTotalBet() {
+    return gameState.totalBet;
+}
+
+/**
+ * Get winner reward for current round
+ */
+function getWinnerReward() {
+    return gameState.winnerReward;
+}
+
+/**
+ * Get admin commission for current round
+ */
+function getAdminCommission() {
+    return gameState.adminCommission;
+}
+
+/**
+ * Get win percentage
+ */
+function getWinPercentage() {
+    return gameState.winPercentage;
+}
+
 // ==================== RESET FUNCTIONS ====================
 
 /**
@@ -439,6 +535,14 @@ function fullGameReset() {
     };
 }
 
+/**
+ * Reset player selections (keep game state)
+ */
+function resetPlayerSelections() {
+    clearAllPlayerCartelas();
+    clearAllCartelas();
+}
+
 // ==================== EXPORTS ====================
 module.exports = {
     // State object (for direct access when needed)
@@ -463,12 +567,13 @@ module.exports = {
     clearAllPlayerCartelas,
     incrementPlayerStats,
     
-    // Cartela management
+    // Cartela management (string IDs)
     reserveCartela,
     releaseCartela,
     isCartelaAvailable,
     getCartelaOwner,
     getAllReservedCartelas,
+    getReservedCartelasByUser,
     clearAllCartelas,
     
     // Session management
@@ -476,6 +581,7 @@ module.exports = {
     removeUserSession,
     hasOtherSessions,
     getUserSessions,
+    getAllActiveSessions,
     
     // Game state getters/setters
     getGameState,
@@ -491,6 +597,20 @@ module.exports = {
     setGameActive,
     setRoundStartTime,
     setRoundEndTime,
+    getCurrentRound,
+    getCurrentStatus,
+    getCurrentTimer,
+    getDrawnNumbers,
+    getCurrentWinners,
+    
+    // Statistics
+    getTotalPlayersCount,
+    getTotalSelectedCartelasCount,
+    getActivePlayersCount,
+    getTotalBet,
+    getWinnerReward,
+    getAdminCommission,
+    getWinPercentage,
     
     // Timer management
     setSelectionTimer,
@@ -504,12 +624,8 @@ module.exports = {
     clearNextRoundTimer,
     clearAllTimers,
     
-    // Statistics
-    getTotalPlayersCount,
-    getTotalSelectedCartelasCount,
-    getActivePlayersCount,
-    
     // Reset
     resetForNewRound,
     fullGameReset,
+    resetPlayerSelections,
 };

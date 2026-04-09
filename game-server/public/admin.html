@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="description" content="Estif Bingo - Admin Control Panel">
+    <meta name="description" content="Estif Bingo 24/7 - Admin Control Panel">
     <meta name="theme-color" content="#0f0c29">
-    <title>Estif Bingo - Admin Panel</title>
+    <title>Estif Bingo 24/7 - Admin Panel</title>
     
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico">
+    <link rel="icon" type="image/png" href="/assets/images/favicon.png">
     <link rel="apple-touch-icon" href="/assets/images/logo.png">
     
     <!-- Google Fonts -->
@@ -26,7 +26,6 @@
             background-attachment: fixed;
         }
         
-        /* Logo in top bar */
         .logo-area {
             display: flex;
             align-items: center;
@@ -54,7 +53,6 @@
             text-align: center;
         }
         
-        /* Login logo */
         .login-logo {
             text-align: center;
             margin-bottom: 20px;
@@ -64,6 +62,63 @@
             height: 80px;
             width: auto;
             object-fit: contain;
+        }
+        
+        .player-search-section {
+            margin-bottom: 20px;
+        }
+        
+        .player-search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .player-search-box input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.3);
+            color: white;
+        }
+        
+        .player-search-box button {
+            padding: 12px 24px;
+        }
+        
+        .player-detail-card {
+            background: linear-gradient(135deg, rgba(30,30,47,0.9), rgba(22,22,42,0.9));
+            border-radius: 16px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+        
+        .player-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .player-balance-large {
+            font-size: 32px;
+            font-weight: bold;
+            color: #4cd964;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
         }
         
         @media (max-width: 768px) {
@@ -76,16 +131,17 @@
             .login-logo img {
                 height: 60px;
             }
+            .player-search-box {
+                flex-direction: column;
+            }
         }
         
-        /* Loading state */
         .loading {
             text-align: center;
             padding: 20px;
             color: #ffd966;
         }
         
-        /* Error message styling */
         .error-msg {
             color: #ff6b6b;
             text-align: center;
@@ -93,12 +149,52 @@
             font-size: 14px;
         }
         
-        /* Success message */
         .success-msg {
             color: #4cd964;
             text-align: center;
             margin-top: 15px;
             font-size: 14px;
+        }
+        
+        .players-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .player-card {
+            background: linear-gradient(135deg, rgba(30,30,47,0.9), rgba(22,22,42,0.9));
+            border-radius: 16px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .player-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(255,215,0,0.3);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+        
+        .player-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #ffd966;
+        }
+        
+        .player-phone {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+        
+        .player-balance {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4cd964;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -110,19 +206,19 @@
             <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
         </div>
         <h2>🔐 Admin Login</h2>
-        <input type="email" id="adminEmail" placeholder="Email" value="admin@estif.com">
-        <input type="password" id="adminPassword" placeholder="Password" value="admin123">
+        <input type="email" id="adminEmail" placeholder="Email">
+        <input type="password" id="adminPassword" placeholder="Password">
         <button id="loginBtn">Login</button>
         <div id="loginError" class="error-msg"></div>
     </div>
 
     <!-- Admin Panel (hidden until login) -->
-    <div id="adminPanel" class="admin-panel">
+    <div id="adminPanel" class="admin-panel" style="display: none;">
         <div class="top-bar">
             <h1>
                 <div class="logo-area">
                     <img src="/assets/images/logo.png" alt="Estif Bingo Logo" onerror="this.style.display='none'">
-                    <span>🎲 Estif Bingo Admin</span>
+                    <span>🎲 Estif Bingo 24/7 Admin</span>
                 </div>
             </h1>
             <button class="logout-btn" id="logoutBtn">Logout</button>
@@ -132,6 +228,7 @@
             <button class="tab-btn active" data-tab="controls">🎮 Game Controls</button>
             <button class="tab-btn" data-tab="reports">📊 Reports</button>
             <button class="tab-btn" data-tab="players">👥 Online Players</button>
+            <button class="tab-btn" data-tab="search">🔍 Search Players</button>
             <button class="tab-btn" data-tab="sounds">🔊 Sound Settings</button>
         </div>
 
@@ -141,22 +238,23 @@
                 <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus">-</div></div>
                 <div class="stat-card"><div class="stat-label">Round</div><div class="stat-value" id="statRound">-</div></div>
                 <div class="stat-card"><div class="stat-label">Timer (sec)</div><div class="stat-value" id="statTimer">-</div></div>
-                <div class="stat-card"><div class="stat-label">Total Bet</div><div class="stat-value" id="statTotalBet">-</div></div>
+                <div class="stat-card"><div class="stat-label">Total Pool</div><div class="stat-value" id="statTotalBet">-</div></div>
                 <div class="stat-card"><div class="stat-label">Winner Reward</div><div class="stat-value" id="statWinnerReward">-</div></div>
-                <div class="stat-card"><div class="stat-label">Admin Commission</div><div class="stat-value" id="statCommission">-</div></div>
+                <div class="stat-card"><div class="stat-label">Commission</div><div class="stat-value" id="statCommission">-</div></div>
                 <div class="stat-card"><div class="stat-label">Players Online</div><div class="stat-value" id="statPlayersCount">-</div></div>
                 <div class="stat-card"><div class="stat-label">Win %</div><div class="stat-value" id="statWinPercent">-</div></div>
             </div>
             <div class="control-group">
+                <label>🏆 Win Percentage:</label>
                 <select id="winPercentSelect">
                     <option value="70">70%</option>
-                    <option value="75">75%</option>
+                    <option value="75" selected>75%</option>
                     <option value="76">76%</option>
                     <option value="80">80%</option>
                 </select>
-                <button id="setWinPercentBtn" class="btn btn-primary">Set Win Percentage</button>
-                <button id="startGameBtn" class="btn btn-primary">🚀 Start Game (Force)</button>
-                <button id="endGameBtn" class="btn btn-danger">⏹️ End Round (No Winner)</button>
+                <button id="setWinPercentBtn" class="btn btn-primary">Set Win %</button>
+                <button id="startGameBtn" class="btn btn-primary">🚀 Force Start Round</button>
+                <button id="endGameBtn" class="btn btn-danger">⏹️ Force End Round</button>
                 <button id="resetGameBtn" class="btn btn-warning">🔄 Reset Game (Round 1)</button>
             </div>
             <div id="actionMessage" style="margin-top: 10px; color: #ffd700;"></div>
@@ -174,13 +272,43 @@
                 </select>
                 <div id="dynamicDateInputs"></div>
                 <button id="fetchReportBtn" class="btn btn-primary">Fetch Report</button>
+                <button id="exportReportBtn" class="btn btn-success">📥 Export CSV</button>
             </div>
             <div id="reportResult" style="overflow-x: auto;"></div>
         </div>
 
-        <!-- Players Tab -->
+        <!-- Online Players Tab -->
         <div id="playersTab" class="tab-content">
-            <div id="playersListContainer" class="players-list"></div>
+            <div class="control-group">
+                <label>👥 Online Players ({{count}})</label>
+                <button id="refreshPlayersBtn" class="btn btn-secondary">🔄 Refresh</button>
+            </div>
+            <div id="playersListContainer" class="players-grid"></div>
+        </div>
+
+        <!-- Search Players Tab -->
+        <div id="searchTab" class="tab-content">
+            <div class="player-search-section">
+                <div class="player-search-box">
+                    <input type="text" id="playerSearchInput" placeholder="Search by username or phone number...">
+                    <button id="searchPlayerBtn" class="btn btn-primary">🔍 Search</button>
+                </div>
+                <div id="searchResultsContainer"></div>
+            </div>
+            
+            <!-- Player Detail Modal (hidden by default) -->
+            <div id="playerDetailModal" style="display: none;" class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-header">
+                        <span>👤 Player Details</span>
+                        <span class="modal-close" onclick="closePlayerDetail()">&times;</span>
+                    </div>
+                    <div class="modal-body" id="playerDetailContent"></div>
+                    <div class="modal-footer">
+                        <button onclick="closePlayerDetail()" class="btn btn-secondary">Close</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Sound Settings Tab -->
@@ -188,16 +316,21 @@
             <div class="control-group">
                 <label style="margin-right:10px">🎵 Select Sound Pack:</label>
                 <select id="soundPackSelect">
-                    <option value="pack1">🔊 Sound Pack 1 (Default)</option>
-                    <option value="pack2">🎵 Sound Pack 2</option>
-                    <option value="pack3">🎶 Sound Pack 3</option>
-                    <option value="pack4">🎼 Sound Pack 4</option>
+                    <option value="pack1">🔊 Classic Pack</option>
+                    <option value="pack2">🎵 Electronic Pack</option>
+                    <option value="pack3">🎶 Casino Pack</option>
+                    <option value="pack4">🎼 Retro Pack</option>
                 </select>
                 <button id="applySoundPackBtn" class="btn btn-primary">Apply to Player Page</button>
             </div>
+            <div class="control-group">
+                <label>🔊 Volume Control (Preview):</label>
+                <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.7" style="width: 200px;">
+                <span id="volumeValue">70%</span>
+            </div>
             <div class="info-text">
                 <img src="/assets/images/bingo-ball.png" alt="🎱" style="width: 16px; height: 16px; vertical-align: middle;" onerror="this.style.display='none'">
-                ⚠️ This setting is saved in your browser and affects the player page only. Each player can choose their own sound pack.
+                ⚠️ Sound settings are saved in your browser and affect the player page. Each player can choose their own sound pack.
             </div>
         </div>
     </div>
@@ -205,12 +338,15 @@
 
 <script src="/assets/js/utils.js"></script>
 <script>
-    // ---------- Helper functions ----------
+    // ---------- Global Variables ----------
     let adminToken = localStorage.getItem('adminToken');
-    const API_BASE = ''; // relative to same origin
+    const API_BASE = '';
     let loginAttempts = 0;
     const MAX_LOGIN_ATTEMPTS = 5;
+    let statsInterval = null;
+    let playersInterval = null;
 
+    // ---------- API Helper ----------
     async function apiCall(endpoint, method = 'GET', body = null) {
         const headers = {
             'Content-Type': 'application/json',
@@ -218,17 +354,24 @@
         };
         const options = { method, headers };
         if (body) options.body = JSON.stringify(body);
-        const res = await fetch(`${API_BASE}${endpoint}`, options);
-        if (res.status === 401) {
-            logout();
-            throw new Error('Session expired');
+        
+        try {
+            const res = await fetch(`${API_BASE}${endpoint}`, options);
+            if (res.status === 401) {
+                logout();
+                throw new Error('Session expired');
+            }
+            if (res.status === 429) {
+                throw new Error('Too many requests. Please wait a moment.');
+            }
+            return await res.json();
+        } catch (error) {
+            console.error('API call failed:', error);
+            throw error;
         }
-        if (res.status === 429) {
-            throw new Error('Too many requests. Please wait a moment.');
-        }
-        return res.json();
     }
 
+    // ---------- UI Helpers ----------
     function showMessage(msg, isError = false) {
         const msgDiv = document.getElementById('actionMessage');
         if (msgDiv) {
@@ -237,52 +380,6 @@
             setTimeout(() => { msgDiv.innerText = ''; }, 3000);
         } else {
             alert(msg);
-        }
-    }
-
-    async function refreshGameStats() {
-        try {
-            const data = await apiCall('/api/admin/stats');
-            if (data.success) {
-                document.getElementById('statStatus').innerText = data.status || '-';
-                document.getElementById('statRound').innerText = data.round || '-';
-                document.getElementById('statTimer').innerText = data.timer || '-';
-                document.getElementById('statTotalBet').innerText = (data.totalBet || 0).toFixed(2);
-                document.getElementById('statWinnerReward').innerText = (data.winnerReward || 0).toFixed(2);
-                document.getElementById('statCommission').innerText = (data.adminCommission || 0).toFixed(2);
-                document.getElementById('statPlayersCount').innerText = data.playersCount || 0;
-                document.getElementById('statWinPercent').innerText = `${data.winPercentage || 75}%`;
-                // sync dropdown
-                const select = document.getElementById('winPercentSelect');
-                if (select && data.winPercentage) select.value = data.winPercentage;
-            }
-        } catch (err) {
-            console.error('Stats error:', err);
-        }
-    }
-
-    async function loadOnlinePlayers() {
-        try {
-            const data = await apiCall('/api/admin/players');
-            if (data.success && data.players) {
-                const container = document.getElementById('playersListContainer');
-                container.innerHTML = '';
-                if (data.players.length === 0) {
-                    container.innerHTML = '<div class="player-card">No players online</div>';
-                } else {
-                    data.players.forEach(p => {
-                        const card = document.createElement('div');
-                        card.className = 'player-card';
-                        card.innerHTML = `<strong>${escapeHtml(p.username)}</strong> - ${p.selectedCount} cartelas | ${p.balance} ETB`;
-                        container.appendChild(card);
-                    });
-                }
-            } else {
-                document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Failed to load players</div>';
-            }
-        } catch (err) {
-            console.error(err);
-            document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Error loading players</div>';
         }
     }
 
@@ -296,6 +393,159 @@
         });
     }
 
+    // ---------- Dashboard Stats ----------
+    async function refreshGameStats() {
+        try {
+            const data = await apiCall('/api/admin/stats');
+            if (data.success) {
+                document.getElementById('statStatus').innerText = data.status || '-';
+                document.getElementById('statRound').innerText = data.round || '-';
+                document.getElementById('statTimer').innerText = data.timer || '-';
+                document.getElementById('statTotalBet').innerText = (data.totalBet || 0).toFixed(2);
+                document.getElementById('statWinnerReward').innerText = (data.winnerReward || 0).toFixed(2);
+                document.getElementById('statCommission').innerText = (data.adminCommission || 0).toFixed(2);
+                document.getElementById('statPlayersCount').innerText = data.playersCount || 0;
+                document.getElementById('statWinPercent').innerText = `${data.winPercentage || 75}%`;
+                
+                const select = document.getElementById('winPercentSelect');
+                if (select && data.winPercentage) select.value = data.winPercentage;
+            }
+        } catch (err) {
+            console.error('Stats error:', err);
+        }
+    }
+
+    // ---------- Online Players ----------
+    async function loadOnlinePlayers() {
+        try {
+            const data = await apiCall('/api/admin/players');
+            if (data.success && data.players) {
+                const container = document.getElementById('playersListContainer');
+                container.innerHTML = '';
+                if (data.players.length === 0) {
+                    container.innerHTML = '<div class="player-card">No players online</div>';
+                } else {
+                    data.players.forEach(p => {
+                        const card = document.createElement('div');
+                        card.className = 'player-card';
+                        card.innerHTML = `
+                            <div class="player-name">${escapeHtml(p.username || 'Player')}</div>
+                            <div>🎯 Cartelas: ${p.selectedCount || 0}/${p.maxCartelas || 4}</div>
+                            <div class="player-balance">💰 ${parseFloat(p.balance || 0).toFixed(2)} ETB</div>
+                            <div style="font-size: 11px; opacity: 0.7;">ID: ${p.telegram_id}</div>
+                        `;
+                        card.onclick = () => showPlayerDetail(p.telegram_id);
+                        container.appendChild(card);
+                    });
+                }
+            }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('playersListContainer').innerHTML = '<div class="player-card">Error loading players</div>';
+        }
+    }
+
+    // ---------- Search Players ----------
+    async function searchPlayers() {
+        const searchTerm = document.getElementById('playerSearchInput').value.trim();
+        if (searchTerm.length < 2) {
+            showMessage('Please enter at least 2 characters', true);
+            return;
+        }
+        
+        try {
+            const data = await apiCall('/api/admin/search-players', 'POST', { search: searchTerm });
+            if (data.success && data.players) {
+                displaySearchResults(data.players);
+            } else {
+                document.getElementById('searchResultsContainer').innerHTML = '<div class="player-card">No players found</div>';
+            }
+        } catch (err) {
+            showMessage('Search failed', true);
+        }
+    }
+    
+    function displaySearchResults(players) {
+        const container = document.getElementById('searchResultsContainer');
+        container.innerHTML = '<div class="players-grid"></div>';
+        const grid = container.querySelector('.players-grid');
+        
+        if (players.length === 0) {
+            grid.innerHTML = '<div class="player-card">No players found</div>';
+            return;
+        }
+        
+        players.forEach(player => {
+            const card = document.createElement('div');
+            card.className = 'player-card';
+            card.innerHTML = `
+                <div class="player-name">${escapeHtml(player.username || 'Unknown')}</div>
+                <div class="player-phone">📱 ${player.phone || 'No phone'}</div>
+                <div class="player-balance">💰 ${parseFloat(player.balance || 0).toFixed(2)} ETB</div>
+                <div>💳 Total Deposited: ${parseFloat(player.total_deposited || 0).toFixed(2)} ETB</div>
+                <div style="font-size: 11px; opacity: 0.7; margin-top: 5px;">ID: ${player.telegram_id}</div>
+            `;
+            card.onclick = () => showPlayerDetail(player.telegram_id);
+            grid.appendChild(card);
+        });
+    }
+    
+    async function showPlayerDetail(telegramId) {
+        try {
+            const data = await apiCall(`/api/admin/player/${telegramId}`);
+            if (data.success && data.player) {
+                const p = data.player;
+                const modal = document.getElementById('playerDetailModal');
+                const content = document.getElementById('playerDetailContent');
+                content.innerHTML = `
+                    <div class="player-detail-card">
+                        <div class="player-detail-header">
+                            <strong>${escapeHtml(p.username || 'Player')}</strong>
+                            <span>ID: ${p.telegram_id}</span>
+                        </div>
+                        <div>📱 Phone: ${p.phone || 'Not registered'}</div>
+                        <div>🌐 Language: ${p.language === 'am' ? 'አማርኛ' : 'English'}</div>
+                        <div class="player-balance-large">${parseFloat(p.balance || 0).toFixed(2)} ETB</div>
+                        <div>💳 Total Deposited: ${parseFloat(p.total_deposited || 0).toFixed(2)} ETB</div>
+                        <div>📅 Joined: ${new Date(p.created_at).toLocaleString()}</div>
+                        <div class="action-buttons">
+                            <button onclick="adjustPlayerBalance(${p.telegram_id}, 10)" class="btn btn-success btn-sm">+10 ETB</button>
+                            <button onclick="adjustPlayerBalance(${p.telegram_id}, -10)" class="btn btn-warning btn-sm">-10 ETB</button>
+                        </div>
+                    </div>
+                `;
+                modal.style.display = 'flex';
+            }
+        } catch (err) {
+            showMessage('Failed to load player details', true);
+        }
+    }
+    
+    async function adjustPlayerBalance(telegramId, amount) {
+        if (confirm(`Adjust balance by ${amount} ETB for this player?`)) {
+            try {
+                const data = await apiCall('/api/admin/adjust-balance', 'POST', {
+                    telegram_id: telegramId,
+                    amount: amount
+                });
+                if (data.success) {
+                    showMessage(`Balance adjusted by ${amount} ETB. New balance: ${data.new_balance} ETB`);
+                    showPlayerDetail(telegramId);
+                    refreshGameStats();
+                } else {
+                    showMessage(data.message || 'Adjustment failed', true);
+                }
+            } catch (err) {
+                showMessage('Failed to adjust balance', true);
+            }
+        }
+    }
+    
+    function closePlayerDetail() {
+        document.getElementById('playerDetailModal').style.display = 'none';
+    }
+
+    // ---------- Game Controls ----------
     async function setWinPercentage() {
         const percentage = parseInt(document.getElementById('winPercentSelect').value);
         try {
@@ -357,36 +607,37 @@
         }
     }
 
-    // Report handling
+    // ---------- Reports ----------
     function updateDateInputs() {
         const type = document.getElementById('reportType').value;
         const container = document.getElementById('dynamicDateInputs');
         container.innerHTML = '';
+        const today = new Date().toISOString().slice(0,10);
+        
         if (type === 'daily') {
-            container.innerHTML = '<input type="date" id="reportDate" class="form-input" value="' + new Date().toISOString().slice(0,10) + '">';
+            container.innerHTML = `<input type="date" id="reportDate" class="form-input" value="${today}">`;
         } else if (type === 'weekly') {
             const now = new Date();
-            const year = now.getFullYear();
             const week = getWeekNumber(now);
             container.innerHTML = `
-                <input type="number" id="weekYear" class="form-input" placeholder="Year" value="${year}" style="width:100px">
-                <input type="number" id="weekNum" class="form-input" placeholder="Week" value="${week}" style="width:100px">
+                <input type="number" id="weekYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
+                <input type="number" id="weekNum" placeholder="Week" value="${week}" style="width:100px">
             `;
         } else if (type === 'monthly') {
             const now = new Date();
             container.innerHTML = `
-                <input type="number" id="monthYear" class="form-input" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
-                <select id="monthNum" class="form-select">
+                <input type="number" id="monthYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
+                <select id="monthNum">
                     ${[...Array(12)].map((_, i) => `<option value="${i+1}" ${i+1 === now.getMonth()+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('default', {month:'long'})}</option>`).join('')}
                 </select>
             `;
         } else if (type === 'range') {
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
             container.innerHTML = `
-                <input type="date" id="startDate" class="form-input" placeholder="Start Date">
-                <input type="date" id="endDate" class="form-input" placeholder="End Date">
+                <input type="date" id="startDate" value="${weekAgo.toISOString().slice(0,10)}">
+                <input type="date" id="endDate" value="${today}">
             `;
-        } else if (type === 'commission') {
-            // no extra inputs
         }
     }
 
@@ -400,6 +651,7 @@
     async function fetchReport() {
         const type = document.getElementById('reportType').value;
         let url = '';
+        
         if (type === 'daily') {
             const date = document.getElementById('reportDate').value;
             if (!date) return showMessage('Select date', true);
@@ -421,6 +673,7 @@
         } else if (type === 'commission') {
             url = `/api/reports/commission`;
         }
+        
         try {
             const data = await apiCall(url);
             if (data.success) {
@@ -432,18 +685,18 @@
             showMessage('Failed to fetch report', true);
         }
     }
-
+    
     function displayReport(data, type) {
         const container = document.getElementById('reportResult');
         if (type === 'commission') {
-            let html = '<h3>💰 Commission Breakdown</h3><table class="admin-table"><thead><tr><th>Round ID</th><th>Date</th><th>Total Pool</th><th>Winner Reward</th><th>Admin Commission</th><th>Win %</th></tr></thead><tbody>';
+            let html = '<h3>💰 Commission Breakdown</h3><table class="admin-table"><thead><tr><th>Round ID</th><th>Date</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Win %</th></tr></thead><tbody>';
             (data.commissionByRound || []).forEach(r => {
                 html += `<tr>
                     <td>${r.round_id}</td>
                     <td>${new Date(r.timestamp).toLocaleString()}</td>
-                    <td>${r.total_pool}</td>
-                    <td>${r.winner_reward}</td>
-                    <td>${r.admin_commission}</td>
+                    <td>${r.total_pool} ETB</td>
+                    <td>${r.winner_reward} ETB</td>
+                    <td>${r.admin_commission} ETB</td>
                     <td>${r.win_percentage}%</td>
                 </tr>`;
             });
@@ -456,32 +709,62 @@
                         <div class="stat-card"><div class="stat-label">Total Games</div><div class="stat-value">${report.totalGames}</div></div>
                         <div class="stat-card"><div class="stat-label">Total Bet</div><div class="stat-value">${report.totalBet} ETB</div></div>
                         <div class="stat-card"><div class="stat-label">Total Won</div><div class="stat-value">${report.totalWon} ETB</div></div>
-                        <div class="stat-card"><div class="stat-label">Total Commission</div><div class="stat-value">${report.totalCommission} ETB</div></div>
+                        <div class="stat-card"><div class="stat-label">Commission</div><div class="stat-value">${report.totalCommission} ETB</div></div>
                     </div>`;
             if (report.rounds && report.rounds.length) {
-                html += '<table class="admin-table"><thead><tr><th>Round ID</th><th>Round #</th><th>Total Cartelas</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Winners</th><th>Time</th></tr></thead><tbody>';
+                html += '<table class="admin-table"><thead><tr><th>Round #</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Winners</th><th>Time</th></tr></thead><tbody>';
                 report.rounds.forEach(r => {
-                    let winners = r.winners ? (Array.isArray(r.winners) ? r.winners.join(', ') : '-') : '-';
                     html += `<tr>
-                        <td>${r.round_id}</td>
                         <td>${r.round_number}</td>
-                        <td>${r.total_cartelas}</td>
-                        <td>${r.total_pool}</td>
-                        <td>${r.winner_reward}</td>
-                        <td>${r.admin_commission}</td>
-                        <td>${winners}</td>
+                        <td>${r.total_pool} ETB</td>
+                        <td>${r.winner_reward} ETB</td>
+                        <td>${r.admin_commission} ETB</td>
+                        <td>${r.winners_count || 0}</td>
                         <td>${new Date(r.timestamp).toLocaleString()}</td>
                     </tr>`;
                 });
                 html += '</tbody></table>';
-            } else {
-                html += '<p>No rounds found.</p>';
             }
             container.innerHTML = html;
         }
     }
+    
+    async function exportReport() {
+        const type = document.getElementById('reportType').value;
+        let url = '';
+        
+        if (type === 'daily') {
+            const date = document.getElementById('reportDate').value;
+            url = `/api/reports/export/daily?date=${date}`;
+        } else if (type === 'range') {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            url = `/api/reports/export/range?startDate=${start}&endDate=${end}`;
+        } else {
+            showMessage('Export only available for Daily and Custom Range', true);
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${API_BASE}${url}`, {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = `bingo_report_${Date.now()}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+            showMessage('Export started');
+        } catch (err) {
+            showMessage('Export failed', true);
+        }
+    }
 
-    // Sound pack selection (stored in localStorage, affects player page)
+    // ---------- Sound Settings ----------
     function loadSoundPackSelection() {
         const saved = localStorage.getItem('soundPack');
         if (saved) {
@@ -494,15 +777,30 @@
         localStorage.setItem('soundPack', pack);
         showMessage(`✅ Sound pack set to ${pack}. It will be used on the player page.`);
     }
+    
+    function initVolumeControl() {
+        const slider = document.getElementById('volumeSlider');
+        const valueSpan = document.getElementById('volumeValue');
+        const savedVolume = localStorage.getItem('soundVolume');
+        const volume = savedVolume ? parseFloat(savedVolume) : 0.7;
+        slider.value = volume;
+        valueSpan.textContent = `${Math.round(volume * 100)}%`;
+        
+        slider.addEventListener('input', (e) => {
+            const vol = parseFloat(e.target.value);
+            localStorage.setItem('soundVolume', vol);
+            valueSpan.textContent = `${Math.round(vol * 100)}%`;
+        });
+    }
 
-    // Login / Logout
+    // ---------- Login/Logout ----------
     function logout() {
         localStorage.removeItem('adminToken');
         adminToken = null;
         document.getElementById('loginSection').style.display = 'block';
         document.getElementById('adminPanel').style.display = 'none';
-        if (window.statsInterval) clearInterval(window.statsInterval);
-        if (window.playersInterval) clearInterval(window.playersInterval);
+        if (statsInterval) clearInterval(statsInterval);
+        if (playersInterval) clearInterval(playersInterval);
         loginAttempts = 0;
         document.getElementById('loginError').innerText = '';
     }
@@ -512,12 +810,10 @@
         const password = document.getElementById('adminPassword').value;
         const errorDiv = document.getElementById('loginError');
         
-        // Clear previous error
         errorDiv.innerText = '';
         
-        // Check login attempts
         if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-            errorDiv.innerText = 'Too many failed attempts. Please wait 10 minutes.';
+            errorDiv.innerText = 'Too many failed attempts. Please wait.';
             return;
         }
         
@@ -529,7 +825,7 @@
             });
             
             if (res.status === 429) {
-                errorDiv.innerText = 'Too many requests. Please wait a moment.';
+                errorDiv.innerText = 'Too many requests. Please wait.';
                 return;
             }
             
@@ -541,11 +837,10 @@
                 document.getElementById('adminPanel').style.display = 'block';
                 refreshGameStats();
                 loadOnlinePlayers();
-                if (window.statsInterval) clearInterval(window.statsInterval);
-                window.statsInterval = setInterval(refreshGameStats, 5000);
-                if (window.playersInterval) clearInterval(window.playersInterval);
-                window.playersInterval = setInterval(loadOnlinePlayers, 10000);
+                statsInterval = setInterval(refreshGameStats, 5000);
+                playersInterval = setInterval(loadOnlinePlayers, 10000);
                 loadSoundPackSelection();
+                initVolumeControl();
                 loginAttempts = 0;
             } else {
                 loginAttempts++;
@@ -556,7 +851,7 @@
         }
     }
 
-    // Tab switching
+    // ---------- Tab Switching ----------
     function initTabs() {
         const btns = document.querySelectorAll('.tab-btn');
         btns.forEach(btn => {
@@ -572,8 +867,8 @@
         });
     }
 
-    // On page load
-    window.onload = () => {
+    // ---------- Event Listeners ----------
+    document.addEventListener('DOMContentLoaded', () => {
         if (adminToken) {
             fetch('/api/admin/stats', {
                 headers: { 'Authorization': `Bearer ${adminToken}` }
@@ -585,16 +880,14 @@
                     document.getElementById('adminPanel').style.display = 'block';
                     refreshGameStats();
                     loadOnlinePlayers();
-                    window.statsInterval = setInterval(refreshGameStats, 5000);
-                    window.playersInterval = setInterval(loadOnlinePlayers, 10000);
+                    statsInterval = setInterval(refreshGameStats, 5000);
+                    playersInterval = setInterval(loadOnlinePlayers, 10000);
                     loadSoundPackSelection();
+                    initVolumeControl();
                 }
             }).catch(() => logout());
-        } else {
-            document.getElementById('loginSection').style.display = 'block';
-            document.getElementById('adminPanel').style.display = 'none';
         }
-
+        
         document.getElementById('loginBtn').addEventListener('click', login);
         document.getElementById('logoutBtn').addEventListener('click', logout);
         document.getElementById('setWinPercentBtn').addEventListener('click', setWinPercentage);
@@ -603,11 +896,17 @@
         document.getElementById('resetGameBtn').addEventListener('click', resetGame);
         document.getElementById('reportType').addEventListener('change', updateDateInputs);
         document.getElementById('fetchReportBtn').addEventListener('click', fetchReport);
+        document.getElementById('exportReportBtn').addEventListener('click', exportReport);
         document.getElementById('applySoundPackBtn').addEventListener('click', applySoundPack);
+        document.getElementById('searchPlayerBtn').addEventListener('click', searchPlayers);
+        document.getElementById('refreshPlayersBtn').addEventListener('click', loadOnlinePlayers);
+        document.getElementById('playerSearchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchPlayers();
+        });
+        
         initTabs();
         updateDateInputs();
-        loadSoundPackSelection();
-    };
+    });
 </script>
 </body>
 </html>

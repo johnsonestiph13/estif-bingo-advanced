@@ -2,7 +2,7 @@
 
 const { config } = require("../config");
 const { verifySocketToken } = require("../middleware/auth");
-const { selectCartelaRateLimiter, deselectCartelaRateLimiter } = require("../middleware/rateLimit");
+const { selectCartelaRateLimiter, deselectCartelaRateLimiter, gameActionRateLimiter, balanceCheckRateLimiter } = require("../middleware/rateLimit");
 const gameState = require("../game/gameState");
 const cartela = require("../game/cartela");
 const roundManager = require("../game/roundManager");
@@ -36,7 +36,8 @@ function broadcastTimer(io) {
     io.emit("timerUpdate", {
         seconds: gameState.gameState.timer,
         round: gameState.gameState.round,
-        formatted: roundManager.formatTime(gameState.gameState.timer)
+        formatted: roundManager.formatTime(gameState.gameState.timer),
+        phase: gameState.gameState.status
     });
 }
 
@@ -74,7 +75,10 @@ function broadcastToUserDevices(telegramId, event, data, excludeSocketId = null)
     for (const socketId of sessions) {
         if (socketId !== excludeSocketId) {
             const io = require("socket.io").sockets;
-            io.to(socketId).emit(event, data);
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+                socket.emit(event, data);
+            }
         }
     }
 }
@@ -120,20 +124,19 @@ function initSocketIO(io) {
             const { token } = data;
             
             if (!token) {
-                socket.emit("error", { message: "Authentication token required" });
+                socket.emit("error", { message: "Authentication token required", code: "MISSING_TOKEN" });
                 return;
             }
             
             // Verify JWT token
             const verification = verifySocketToken(token);
             if (!verification.valid) {
-                socket.emit("error", { message: verification.error || "Invalid token" });
+                socket.emit("error", { message: verification.error || "Invalid token", code: "INVALID_TOKEN" });
                 return;
             }
             
             const { telegram_id, username, balance } = verification.decoded;
             
-            // Check if user is registered in bot (optional validation)
             // Store user session
             gameState.addUserSession(telegram_id, socket.id);
             
@@ -164,9 +167,9 @@ function initSocketIO(io) {
             } else {
                 // Check for saved selections from crash recovery
                 let savedSelections = [];
-                for (const [cartelaNum, reservation] of gameState.globalTakenCartelas) {
+                for (const [cartelaId, reservation] of gameState.globalTakenCartelas) {
                     if (reservation.telegramId === telegram_id) {
-                        savedSelections.push(cartelaNum);
+                        savedSelections.push(cartelaId);
                     }
                 }
                 
@@ -187,10 +190,12 @@ function initSocketIO(io) {
             // Send initial data to client
             socket.emit("authenticated", {
                 success: true,
-                username: playerData.username,
-                balance: playerData.balance,
-                selectedCartelas: playerData.selectedCartelas,
-                telegramId: telegram_id
+                user: {
+                    username: playerData.username,
+                    balance: playerData.balance,
+                    telegramId: telegram_id
+                },
+                selectedCartelas: playerData.selectedCartelas
             });
             
             // Send current game state
@@ -208,7 +213,8 @@ function initSocketIO(io) {
             socket.emit("timerUpdate", {
                 seconds: gameState.gameState.timer,
                 round: gameState.gameState.round,
-                formatted: roundManager.formatTime(gameState.gameState.timer)
+                formatted: roundManager.formatTime(gameState.gameState.timer),
+                phase: gameState.gameState.status
             });
             
             // Send reward pool update
@@ -216,11 +222,10 @@ function initSocketIO(io) {
             const rewardUpdate = rewardPool.getRewardPoolUpdate(totalCartelas, config.BET_AMOUNT);
             socket.emit("rewardPoolUpdate", rewardUpdate);
             
-            // Send player data
-            socket.emit("playerData", {
-                selectedCartelas: playerData.selectedCartelas,
-                balance: playerData.balance,
-                username: playerData.username
+            // Send balance update
+            socket.emit("balanceUpdated", { 
+                balance: playerData.balance, 
+                canPlay: playerData.balance >= config.BET_AMOUNT 
             });
             
             // Update all clients with new player list
@@ -241,24 +246,26 @@ function initSocketIO(io) {
             const player = gameState.getPlayer(socket.id);
             if (player && data.username?.trim()) {
                 const newUsername = data.username.trim().substring(0, 20);
-                player.username = newUsername;
+                const sanitizedUsername = newUsername.replace(/[<>]/g, '');
+                player.username = sanitizedUsername;
                 
-                socket.emit("usernameChanged", { username: newUsername });
+                socket.emit("usernameChanged", { username: sanitizedUsername });
                 broadcastGameState(io);
-                broadcastToUserDevices(player.telegramId, "usernameChanged", { username: newUsername }, socket.id);
+                broadcastToUserDevices(player.telegramId, "usernameChanged", { username: sanitizedUsername }, socket.id);
             }
         });
         
         /**
-         * Select a cartela
+         * Select a cartela (supports string IDs like "B1_001")
          */
         socket.on("selectCartela", async (data, callback) => {
             // Rate limiting
             if (!selectCartelaRateLimiter.isAllowed(socket.id)) {
+                const errorMsg = "Too many attempts. Please slow down.";
                 if (callback) {
-                    callback({ success: false, error: "Too many attempts. Please slow down." });
+                    callback({ success: false, error: errorMsg });
                 } else {
-                    socket.emit("error", { message: "Too many attempts. Please slow down." });
+                    socket.emit("error", { message: errorMsg, code: "RATE_LIMIT" });
                 }
                 return;
             }
@@ -267,6 +274,13 @@ function initSocketIO(io) {
                 const player = gameState.getPlayer(socket.id);
                 if (!player) {
                     throw new Error("Not authenticated");
+                }
+                
+                const cartelaId = data.cartelaId;
+                
+                // Validate cartela ID format
+                if (!cartela.isValidCartelaId(cartelaId)) {
+                    throw new Error(`Invalid cartela ID: ${cartelaId}`);
                 }
                 
                 // Validate game state
@@ -279,8 +293,8 @@ function initSocketIO(io) {
                     throw new Error(`Maximum ${config.MAX_CARTELAS} cartelas per round`);
                 }
                 
-                if (player.selectedCartelas.includes(data.cartelaNumber)) {
-                    throw new Error("Cartela already selected");
+                if (player.selectedCartelas.includes(cartelaId)) {
+                    throw new Error(`Cartela ${cartelaId} already selected`);
                 }
                 
                 // Validate balance
@@ -289,43 +303,33 @@ function initSocketIO(io) {
                 }
                 
                 // Validate cartela availability
-                if (!gameState.isCartelaAvailable(data.cartelaNumber)) {
-                    const owner = gameState.getCartelaOwner(data.cartelaNumber);
-                    throw new Error(`Cartela ${data.cartelaNumber} already taken by ${owner.username}`);
+                if (!gameState.isCartelaAvailable(cartelaId)) {
+                    const owner = gameState.getCartelaOwner(cartelaId);
+                    throw new Error(`Cartela ${cartelaId} already taken by ${owner.username}`);
                 }
                 
                 // Reserve cartela
-                const reserved = gameState.reserveCartela(data.cartelaNumber, player.telegramId, player.username);
+                const reserved = gameState.reserveCartela(cartelaId, player.telegramId, player.username);
                 if (!reserved) {
                     throw new Error("Cartela was just taken by someone else");
                 }
                 
-                // Deduct balance (will be handled by bot via API call)
-                // The actual deduction happens in the main server.js via bot API
+                // Deduct balance (actual deduction happens via bot API in server.js)
+                const newBalance = player.balance - config.BET_AMOUNT;
+                player.balance = newBalance;
                 
                 // Add cartela to player
-                gameState.addPlayerCartela(socket.id, data.cartelaNumber);
+                gameState.addPlayerCartela(socket.id, cartelaId);
                 
                 // Generate cartela grid (caches it)
-                cartela.getCartelaGrid(data.cartelaNumber);
-                
-                // Log transaction
-                await db.logGameTransaction(
-                    player.telegramId,
-                    player.username,
-                    "bet",
-                    config.BET_AMOUNT,
-                    data.cartelaNumber,
-                    gameState.gameState.round,
-                    "Cartela selection"
-                );
+                cartela.getCartelaGrid(cartelaId);
                 
                 // Prepare response data
                 const selectionData = {
-                    cartela: data.cartelaNumber,
+                    cartelaId: cartelaId,
                     selectedCount: player.selectedCartelas.length,
                     selectedCartelas: player.selectedCartelas,
-                    balance: player.balance - config.BET_AMOUNT,
+                    balance: newBalance,
                     remainingSlots: config.MAX_CARTELAS - player.selectedCartelas.length
                 };
                 
@@ -338,8 +342,9 @@ function initSocketIO(io) {
                 // Broadcast updates to all clients
                 broadcastRewardPool(io);
                 io.emit("cartelaTaken", {
-                    cartelaNumber: data.cartelaNumber,
-                    takenBy: player.username,
+                    cartelaId: cartelaId,
+                    username: player.username,
+                    telegramId: player.telegramId,
                     remainingCartelas: config.TOTAL_CARTELAS - gameState.getTotalSelectedCartelasCount(),
                     totalSelected: gameState.getTotalSelectedCartelasCount()
                 });
@@ -350,17 +355,19 @@ function initSocketIO(io) {
                 if (callback) {
                     callback({ 
                         success: true, 
-                        newBalance: player.balance - config.BET_AMOUNT,
+                        newBalance: newBalance,
                         selectedCartelas: player.selectedCartelas
                     });
                 }
+                
+                console.log(`✅ ${player.username} selected cartela ${cartelaId}`);
                 
             } catch (err) {
                 console.error("Select cartela error:", err.message);
                 if (callback) {
                     callback({ success: false, error: err.message });
                 } else {
-                    socket.emit("error", { message: err.message });
+                    socket.emit("error", { message: err.message, code: "SELECTION_FAILED" });
                 }
             }
         });
@@ -371,7 +378,7 @@ function initSocketIO(io) {
         socket.on("deselectCartela", async (data) => {
             // Rate limiting
             if (!deselectCartelaRateLimiter.isAllowed(socket.id)) {
-                socket.emit("error", { message: "Too many attempts. Please slow down." });
+                socket.emit("error", { message: "Too many attempts. Please slow down.", code: "RATE_LIMIT" });
                 return;
             }
             
@@ -379,36 +386,29 @@ function initSocketIO(io) {
                 const player = gameState.getPlayer(socket.id);
                 if (!player) return;
                 
+                const cartelaId = data.cartelaId;
+                
                 if (gameState.gameState.status !== "selection") {
-                    socket.emit("error", { message: "Cannot deselect now" });
+                    socket.emit("error", { message: "Cannot deselect now", code: "INVALID_PHASE" });
                     return;
                 }
                 
-                const index = player.selectedCartelas.indexOf(data.cartelaNumber);
+                const index = player.selectedCartelas.indexOf(cartelaId);
                 if (index !== -1) {
                     // Release cartela reservation
-                    const released = gameState.releaseCartela(data.cartelaNumber, player.telegramId);
+                    const released = gameState.releaseCartela(cartelaId, player.telegramId);
                     
                     if (released) {
                         // Remove from player
-                        gameState.removePlayerCartela(socket.id, data.cartelaNumber);
+                        gameState.removePlayerCartela(socket.id, cartelaId);
                         
-                        // Refund will be handled by bot API
-                        
-                        // Log transaction
-                        await db.logGameTransaction(
-                            player.telegramId,
-                            player.username,
-                            "refund",
-                            config.BET_AMOUNT,
-                            data.cartelaNumber,
-                            gameState.gameState.round,
-                            "Cartela deselected"
-                        );
+                        // Refund balance
+                        const newBalance = player.balance + config.BET_AMOUNT;
+                        player.balance = newBalance;
                         
                         const updateData = {
                             selectedCartelas: player.selectedCartelas,
-                            balance: player.balance + config.BET_AMOUNT
+                            balance: newBalance
                         };
                         
                         socket.emit("selectionUpdated", updateData);
@@ -416,28 +416,63 @@ function initSocketIO(io) {
                         
                         broadcastRewardPool(io);
                         io.emit("cartelaReleased", {
-                            cartelaNumber: data.cartelaNumber,
+                            cartelaId: cartelaId,
                             releasedBy: player.username,
                             availableCartelas: config.TOTAL_CARTELAS - gameState.getTotalSelectedCartelasCount(),
                             totalSelected: gameState.getTotalSelectedCartelasCount()
                         });
                         
                         broadcastGameState(io);
+                        
+                        console.log(`🔄 ${player.username} deselected cartela ${cartelaId}`);
                     }
                 }
             } catch (err) {
                 console.error("Deselect cartela error:", err);
-                socket.emit("error", { message: err.message });
+                socket.emit("error", { message: err.message, code: "DESELECT_FAILED" });
+            }
+        });
+        
+        /**
+         * Check balance (rate limited)
+         */
+        socket.on("checkBalance", async (data, callback) => {
+            // Rate limiting
+            if (!balanceCheckRateLimiter.isAllowed(socket.id)) {
+                if (callback) {
+                    callback({ success: false, error: "Too many requests. Please slow down." });
+                }
+                return;
+            }
+            
+            try {
+                const player = gameState.getPlayer(socket.id);
+                if (!player) {
+                    throw new Error("Not authenticated");
+                }
+                
+                socket.emit("balanceUpdated", { 
+                    balance: player.balance, 
+                    canPlay: player.balance >= config.BET_AMOUNT 
+                });
+                
+                if (callback) {
+                    callback({ success: true, balance: player.balance });
+                }
+            } catch (err) {
+                if (callback) {
+                    callback({ success: false, error: err.message });
+                }
             }
         });
         
         /**
          * Get player status
          */
-        socket.on("getStatus", () => {
+        socket.on("getPlayerStatus", (callback) => {
             const player = gameState.getPlayer(socket.id);
-            if (player) {
-                socket.emit("playerStatus", {
+            if (player && callback) {
+                callback({
                     balance: player.balance,
                     selectedCartelas: player.selectedCartelas,
                     gameStatus: gameState.gameState.status,
@@ -448,6 +483,24 @@ function initSocketIO(io) {
                     totalPlayed: player.totalPlayed,
                     gamesWon: player.gamesWon,
                     winPercentage: rewardPool.getWinPercentage()
+                });
+            }
+        });
+        
+        /**
+         * Get game status (no auth required)
+         */
+        socket.on("getGameStatus", (callback) => {
+            if (callback) {
+                callback({
+                    status: gameState.gameState.status,
+                    round: gameState.gameState.round,
+                    timer: gameState.gameState.timer,
+                    drawnNumbers: gameState.gameState.drawnNumbers,
+                    playersCount: gameState.getTotalPlayersCount(),
+                    winPercentage: rewardPool.getWinPercentage(),
+                    totalBet: gameState.gameState.totalBet,
+                    winnerReward: gameState.gameState.winnerReward
                 });
             }
         });
@@ -475,11 +528,25 @@ function initSocketIO(io) {
         });
         
         /**
+         * Get reward pool info
+         */
+        socket.on("getRewardPool", (callback) => {
+            const totalCartelas = gameState.getTotalSelectedCartelasCount();
+            const update = rewardPool.getRewardPoolUpdate(totalCartelas, config.BET_AMOUNT);
+            
+            if (callback) {
+                callback(update);
+            } else {
+                socket.emit("rewardPoolUpdate", update);
+            }
+        });
+        
+        /**
          * Ping/pong for latency check
          */
         socket.on("ping", (callback) => {
             if (callback) {
-                callback({ pong: Date.now() });
+                callback({ serverTime: Date.now() });
             }
         });
         
@@ -509,15 +576,16 @@ function initSocketIO(io) {
                     const player = gameState.getPlayer(socket.id);
                     if (player) {
                         // Release all cartelas held by this player
-                        for (const [cartelaNum, reservation] of gameState.globalTakenCartelas) {
+                        for (const [cartelaId, reservation] of gameState.globalTakenCartelas) {
                             if (reservation.telegramId === player.telegramId) {
-                                gameState.globalTakenCartelas.delete(cartelaNum);
+                                gameState.globalTakenCartelas.delete(cartelaId);
                             }
                         }
                         gameState.globalTotalSelectedCartelas = gameState.globalTakenCartelas.size;
                         
                         // Remove player from game state
                         gameState.removePlayer(socket.id);
+                        console.log(`👋 Player ${player.username} removed (no more sessions)`);
                     }
                 }
             } else {
@@ -526,13 +594,14 @@ function initSocketIO(io) {
                 if (player) {
                     const hasOtherSessions = gameState.hasOtherSessions(player.telegramId, socket.id);
                     if (!hasOtherSessions) {
-                        for (const [cartelaNum, reservation] of gameState.globalTakenCartelas) {
+                        for (const [cartelaId, reservation] of gameState.globalTakenCartelas) {
                             if (reservation.telegramId === player.telegramId) {
-                                gameState.globalTakenCartelas.delete(cartelaNum);
+                                gameState.globalTakenCartelas.delete(cartelaId);
                             }
                         }
                         gameState.globalTotalSelectedCartelas = gameState.globalTakenCartelas.size;
                         gameState.removePlayer(socket.id);
+                        console.log(`👋 Player ${player.username} removed (fallback cleanup)`);
                     }
                 }
             }

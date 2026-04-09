@@ -1,51 +1,23 @@
-// assets/js/admin.js - Admin Panel Logic
+// Estif Bingo 24/7 - Admin Module
+// Updated to support string-based cartela IDs and enhanced features
 
-// ==================== GLOBALS ====================
-let adminToken = localStorage.getItem('adminToken');
-let statsInterval = null;
-let playersInterval = null;
+// Admin State
+let adminToken = null;
+let refreshInterval = null;
+let currentReportType = 'daily';
+let currentViewingPlayer = null;
 
-// DOM Elements
-let loginSection, adminPanel, statsGrid, reportResult, playersListContainer;
+// ==================== LOGIN & AUTH ====================
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', () => {
-    loginSection = document.getElementById('loginSection');
-    adminPanel = document.getElementById('adminPanel');
-    statsGrid = document.getElementById('statsGrid');
-    reportResult = document.getElementById('reportResult');
-    playersListContainer = document.getElementById('playersListContainer');
-    
-    // Check if already logged in
-    if (adminToken) {
-        verifyToken();
-    } else {
-        showLogin();
-    }
-    
-    // Setup event listeners
-    setupEventListeners();
-});
-
-// ==================== LOGIN / LOGOUT ====================
-async function verifyToken() {
-    try {
-        const response = await fetch('/api/admin/verify', {
-            headers: { 'Authorization': `Bearer ${adminToken}` }
-        });
-        if (response.ok) {
-            showAdminPanel();
-        } else {
-            logout();
-        }
-    } catch {
-        logout();
-    }
-}
-
-async function login() {
+// Login
+async function adminLogin() {
     const email = document.getElementById('adminEmail').value;
     const password = document.getElementById('adminPassword').value;
+    
+    if (!email || !password) {
+        showError('Please enter email and password');
+        return;
+    }
     
     try {
         const response = await fetch('/api/admin/login', {
@@ -53,340 +25,936 @@ async function login() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
         });
+        
         const data = await response.json();
         
-        if (data.success && data.token) {
+        if (data.success) {
             adminToken = data.token;
             localStorage.setItem('adminToken', adminToken);
             showAdminPanel();
+            startLiveUpdates();
+            showSuccess('Login successful!');
         } else {
-            document.getElementById('loginError').innerText = 'Invalid credentials';
+            showError(data.message || 'Invalid credentials');
         }
-    } catch (err) {
-        document.getElementById('loginError').innerText = 'Login failed';
+    } catch (error) {
+        console.error('Login error:', error);
+        showError('Login failed. Please try again.');
     }
 }
 
+// Logout
 function logout() {
-    localStorage.removeItem('adminToken');
-    adminToken = null;
-    if (statsInterval) clearInterval(statsInterval);
-    if (playersInterval) clearInterval(playersInterval);
-    showLogin();
-}
-
-function showLogin() {
-    loginSection.style.display = 'block';
-    adminPanel.style.display = 'none';
-}
-
-function showAdminPanel() {
-    loginSection.style.display = 'none';
-    adminPanel.style.display = 'block';
-    
-    // Start auto-refresh
-    refreshGameStats();
-    loadOnlinePlayers();
-    statsInterval = setInterval(refreshGameStats, 5000);
-    playersInterval = setInterval(loadOnlinePlayers, 10000);
-    
-    // Load sound pack selection
-    loadSoundPackSelection();
-}
-
-// ==================== EVENT LISTENERS ====================
-function setupEventListeners() {
-    document.getElementById('loginBtn')?.addEventListener('click', login);
-    document.getElementById('logoutBtn')?.addEventListener('click', logout);
-    document.getElementById('setWinPercentBtn')?.addEventListener('click', setWinPercentage);
-    document.getElementById('startGameBtn')?.addEventListener('click', startGame);
-    document.getElementById('endGameBtn')?.addEventListener('click', endGame);
-    document.getElementById('resetGameBtn')?.addEventListener('click', resetGame);
-    document.getElementById('reportType')?.addEventListener('change', updateDateInputs);
-    document.getElementById('fetchReportBtn')?.addEventListener('click', fetchReport);
-    document.getElementById('applySoundPackBtn')?.addEventListener('click', applySoundPack);
-    
-    // Tab switching
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabId = btn.dataset.tab;
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-            document.getElementById(`${tabId}Tab`).classList.add('active');
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            if (tabId === 'players') loadOnlinePlayers();
-            if (tabId === 'reports') updateDateInputs();
-        });
-    });
-}
-
-// ==================== API CALLS ====================
-async function apiCall(endpoint, method = 'GET', body = null) {
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${adminToken}`
-    };
-    const options = { method, headers };
-    if (body) options.body = JSON.stringify(body);
-    
-    const response = await fetch(`/api/admin${endpoint}`, options);
-    if (response.status === 401) {
-        logout();
-        throw new Error('Session expired');
+    if (confirm('Are you sure you want to logout?')) {
+        localStorage.removeItem('adminToken');
+        adminToken = null;
+        if (refreshInterval) clearInterval(refreshInterval);
+        document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('adminPanel').style.display = 'none';
+        showSuccess('Logged out successfully');
     }
-    return response.json();
+}
+
+// Show admin panel
+function showAdminPanel() {
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('adminPanel').style.display = 'block';
+    loadDashboard();
+    loadActivePlayers();
+}
+
+// ==================== DASHBOARD STATS ====================
+
+// Load dashboard stats
+async function loadDashboard() {
+    try {
+        const response = await fetch('/api/admin/stats', {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            updateStats(data);
+        }
+    } catch (error) {
+        console.error('Failed to load stats:', error);
+    }
+}
+
+// Update statistics display
+function updateStats(stats) {
+    document.getElementById('onlinePlayers').textContent = stats.playersCount || 0;
+    document.getElementById('currentRound').textContent = stats.round || 1;
+    document.getElementById('poolAmount').textContent = `${(stats.totalBet || 0).toFixed(2)} ETB`;
+    document.getElementById('winPercentage').textContent = `${stats.winPercentage || 75}%`;
+    document.getElementById('totalBets').textContent = stats.globalSelectedCartelas || 0;
+    document.getElementById('totalWinners').textContent = stats.winnersCount || 0;
+    document.getElementById('totalCommission').textContent = `${(stats.adminCommission || 0).toFixed(2)} ETB`;
+    
+    // Update win percentage select if available
+    const winPercentSelect = document.getElementById('winPercentageSelect');
+    if (winPercentSelect && stats.winPercentage) {
+        winPercentSelect.value = stats.winPercentage;
+    }
 }
 
 // ==================== GAME CONTROLS ====================
-async function refreshGameStats() {
+
+// Change win percentage
+async function changeWinPercentage() {
+    const percentage = parseInt(document.getElementById('winPercentageSelect').value);
+    
     try {
-        const data = await apiCall('/stats');
+        const response = await fetch('/api/admin/win-percentage', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${adminToken}`
+            },
+            body: JSON.stringify({ percentage })
+        });
+        
+        const data = await response.json();
+        
         if (data.success) {
-            document.getElementById('statStatus').innerText = data.status || '-';
-            document.getElementById('statRound').innerText = data.round || '-';
-            document.getElementById('statTimer').innerText = data.timer || '-';
-            document.getElementById('statTotalBet').innerText = (data.totalBet || 0).toFixed(2);
-            document.getElementById('statWinnerReward').innerText = (data.winnerReward || 0).toFixed(2);
-            document.getElementById('statCommission').innerText = (data.adminCommission || 0).toFixed(2);
-            document.getElementById('statPlayersCount').innerText = data.playersCount || 0;
-            document.getElementById('statWinPercent').innerText = `${data.winPercentage || 75}%`;
+            showSuccess(`Win percentage changed to ${percentage}%`);
+            loadDashboard();
+        } else {
+            showError(data.message || 'Failed to change win percentage');
+        }
+    } catch (error) {
+        console.error('Change win percentage error:', error);
+        showError('Failed to change win percentage');
+    }
+}
+
+// Force start round
+async function forceStartRound() {
+    if (confirm('Force start the next round? This will skip the selection phase.')) {
+        try {
+            const response = await fetch('/api/admin/start-game', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
             
-            const select = document.getElementById('winPercentSelect');
-            if (select && data.winPercentage) select.value = data.winPercentage;
-        }
-    } catch (err) {
-        console.error('Stats error:', err);
-    }
-}
-
-async function setWinPercentage() {
-    const percentage = parseInt(document.getElementById('winPercentSelect').value);
-    try {
-        const res = await apiCall('/win-percentage', 'POST', { percentage });
-        if (res.success) {
-            showMessage(`Win percentage set to ${percentage}%`, 'success');
-            refreshGameStats();
-        } else {
-            showMessage(res.message || 'Failed', 'error');
-        }
-    } catch (err) {
-        showMessage('Error setting win percentage', 'error');
-    }
-}
-
-async function startGame() {
-    try {
-        const res = await apiCall('/start-game', 'POST');
-        if (res.success) {
-            showMessage('Game started forcefully!', 'success');
-            refreshGameStats();
-        } else {
-            showMessage(res.message || 'Cannot start game', 'error');
-        }
-    } catch (err) {
-        showMessage('Error starting game', 'error');
-    }
-}
-
-async function endGame() {
-    if (confirm('End current round with no winner? This will skip to next round.')) {
-        try {
-            const res = await apiCall('/end-game', 'POST');
-            if (res.success) {
-                showMessage('Round ended', 'success');
-                refreshGameStats();
+            const data = await response.json();
+            
+            if (data.success) {
+                showSuccess('Round started forcefully!');
+                loadDashboard();
             } else {
-                showMessage(res.message || 'Cannot end game', 'error');
+                showError(data.message || 'Failed to start round');
             }
-        } catch (err) {
-            showMessage('Error ending game', 'error');
+        } catch (error) {
+            console.error('Force start error:', error);
+            showError('Failed to force start');
         }
     }
 }
 
+// Force end round
+async function forceEndRound() {
+    if (confirm('Force end current round? No winners will be declared.')) {
+        try {
+            const response = await fetch('/api/admin/end-game', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showSuccess('Round ended forcefully!');
+                loadDashboard();
+            } else {
+                showError(data.message || 'Failed to end round');
+            }
+        } catch (error) {
+            console.error('Force end error:', error);
+            showError('Failed to force end');
+        }
+    }
+}
+
+// Reset game
 async function resetGame() {
-    if (confirm('⚠️ RESET GAME to round 1? All current cartela selections will be lost. Players remain. Proceed?')) {
+    if (confirm('⚠️ WARNING: Reset entire game to round 1? This action cannot be undone! All current selections will be lost.')) {
         try {
-            const res = await apiCall('/reset-game', 'POST');
-            if (res.success) {
-                showMessage('Game reset to round 1', 'success');
-                refreshGameStats();
+            const response = await fetch('/api/admin/reset-game', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showSuccess('Game reset to round 1');
+                loadDashboard();
             } else {
-                showMessage(res.message || 'Reset failed', 'error');
+                showError(data.message || 'Failed to reset game');
             }
-        } catch (err) {
-            showMessage('Error resetting game', 'error');
+        } catch (error) {
+            console.error('Reset game error:', error);
+            showError('Failed to reset game');
         }
-    }
-}
-
-async function loadOnlinePlayers() {
-    try {
-        const data = await apiCall('/players');
-        if (data.success && data.players) {
-            playersListContainer.innerHTML = '';
-            if (data.players.length === 0) {
-                playersListContainer.innerHTML = '<div class="player-card">No players online</div>';
-            } else {
-                data.players.forEach(p => {
-                    const card = document.createElement('div');
-                    card.className = 'player-card';
-                    card.innerText = `${p.username} - ${p.selectedCount} cartelas | ${p.balance} ETB`;
-                    playersListContainer.appendChild(card);
-                });
-            }
-        }
-    } catch (err) {
-        playersListContainer.innerHTML = '<div class="player-card">Error loading players</div>';
     }
 }
 
 // ==================== REPORTS ====================
-function updateDateInputs() {
-    const type = document.getElementById('reportType').value;
-    const container = document.getElementById('dynamicDateInputs');
-    container.innerHTML = '';
-    
-    if (type === 'daily') {
-        container.innerHTML = '<input type="date" id="reportDate" value="' + new Date().toISOString().slice(0,10) + '">';
-    } else if (type === 'weekly') {
-        const now = new Date();
-        const week = getWeekNumber(now);
-        container.innerHTML = `
-            <input type="number" id="weekYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
-            <input type="number" id="weekNum" placeholder="Week" value="${week}" style="width:100px">
-        `;
-    } else if (type === 'monthly') {
-        const now = new Date();
-        container.innerHTML = `
-            <input type="number" id="monthYear" placeholder="Year" value="${now.getFullYear()}" style="width:100px">
-            <select id="monthNum">
-                ${[...Array(12)].map((_, i) => `<option value="${i+1}" ${i+1 === now.getMonth()+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('default', {month:'long'})}</option>`).join('')}
-            </select>
-        `;
-    } else if (type === 'range') {
-        container.innerHTML = `
-            <input type="date" id="startDate" placeholder="Start Date">
-            <input type="date" id="endDate" placeholder="End Date">
-        `;
-    }
-}
 
-function getWeekNumber(date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
-    const week1 = new Date(d.getFullYear(), 0, 4);
-    return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
-}
-
-async function fetchReport() {
-    const type = document.getElementById('reportType').value;
-    let url = '';
+// Load reports
+async function loadReports() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
     
-    if (type === 'daily') {
-        const date = document.getElementById('reportDate').value;
-        if (!date) return showMessage('Select date', 'error');
-        url = `/api/reports/daily?date=${date}`;
-    } else if (type === 'weekly') {
-        const year = document.getElementById('weekYear').value;
-        const week = document.getElementById('weekNum').value;
-        if (!year || !week) return showMessage('Enter year and week', 'error');
-        url = `/api/reports/weekly?year=${year}&week=${week}`;
-    } else if (type === 'monthly') {
-        const year = document.getElementById('monthYear').value;
-        const month = document.getElementById('monthNum').value;
-        url = `/api/reports/monthly?year=${year}&month=${month}`;
-    } else if (type === 'range') {
-        const start = document.getElementById('startDate').value;
-        const end = document.getElementById('endDate').value;
-        if (!start || !end) return showMessage('Select start and end dates', 'error');
-        url = `/api/reports/range?startDate=${start}&endDate=${end}`;
-    } else if (type === 'commission') {
-        url = `/api/reports/commission`;
+    if (!startDate || !endDate) {
+        showError('Please select start and end dates');
+        return;
     }
     
     try {
-        const data = await fetch(url, {
+        const response = await fetch(`/api/reports/range?startDate=${startDate}&endDate=${endDate}`, {
             headers: { 'Authorization': `Bearer ${adminToken}` }
-        }).then(res => res.json());
+        });
+        
+        const data = await response.json();
         
         if (data.success) {
-            displayReport(data, type);
+            displayReports(data.report);
         } else {
-            showMessage('No data or error', 'error');
+            showError('No data found for this period');
         }
-    } catch (err) {
-        showMessage('Failed to fetch report', 'error');
+    } catch (error) {
+        console.error('Load reports error:', error);
+        showError('Failed to load reports');
     }
 }
 
-function displayReport(data, type) {
-    if (type === 'commission') {
-        let html = '<h3>Commission Breakdown</h3><table class="admin-table"><thead><tr><th>Round ID</th><th>Date</th><th>Total Pool</th><th>Winner Reward</th><th>Admin Commission</th><th>Win %</th></tr></thead><tbody>';
-        (data.commissionByRound || []).forEach(r => {
-            html += `<tr>
-                <td>${r.round_id}</td>
-                <td>${new Date(r.timestamp).toLocaleString()}</td>
-                <td>${r.total_pool}</td>
-                <td>${r.winner_reward}</td>
-                <td>${r.admin_commission}</td>
-                <td>${r.win_percentage}%</td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
-        reportResult.innerHTML = html;
-    } else {
-        const report = data.report;
-        let html = `<h3>Report: ${report.date || report.startDate || 'Range'}</h3>`;
-        html += `<p><strong>Total Games:</strong> ${report.totalGames} | <strong>Total Bet:</strong> ${report.totalBet} ETB | <strong>Total Won:</strong> ${report.totalWon} ETB | <strong>Total Commission:</strong> ${report.totalCommission} ETB</p>`;
-        
-        if (report.rounds && report.rounds.length) {
-            html += '<table class="admin-table"><thead><tr><th>Round ID</th><th>Round #</th><th>Total Cartelas</th><th>Total Pool</th><th>Winner Reward</th><th>Commission</th><th>Winners</th><th>Time</th></tr></thead><tbody>';
-            report.rounds.forEach(r => {
-                let winners = r.winners ? (Array.isArray(r.winners) ? r.winners.join(', ') : '-') : '-';
-                html += `<tr>
-                    <td>${r.round_id}</td>
-                    <td>${r.round_number}</td>
-                    <td>${r.total_cartelas}</td>
-                    <td>${r.total_pool}</td>
-                    <td>${r.winner_reward}</td>
-                    <td>${r.admin_commission}</td>
-                    <td>${winners}</td>
-                    <td>${new Date(r.timestamp).toLocaleString()}</td>
-                </tr>`;
-            });
-            html += '</tbody></table>';
-        } else {
-            html += '<p>No rounds found.</p>';
-        }
-        reportResult.innerHTML = html;
+// Display reports
+function displayReports(report) {
+    const container = document.getElementById('reportsContainer');
+    
+    if (!report || !report.rounds || report.rounds.length === 0) {
+        container.innerHTML = '<p class="no-data">No reports found for this period</p>';
+        return;
     }
+    
+    container.innerHTML = `
+        <div class="report-summary">
+            <div class="summary-card">
+                <span class="summary-label">Total Games</span>
+                <span class="summary-value">${report.totalGames}</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Total Bet</span>
+                <span class="summary-value">${report.totalBet} ETB</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Total Won</span>
+                <span class="summary-value">${report.totalWon} ETB</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Commission</span>
+                <span class="summary-value">${report.totalCommission} ETB</span>
+            </div>
+        </div>
+        <div class="table-wrapper">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Round #</th>
+                        <th>Date</th>
+                        <th>Cartelas</th>
+                        <th>Pool</th>
+                        <th>Payout</th>
+                        <th>Commission</th>
+                        <th>Win %</th>
+                        <th>Winners</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${report.rounds.map(round => `
+                        <tr onclick="viewRoundDetails(${round.round_id})">
+                            <td>${round.round_number}</td>
+                            <td>${new Date(round.timestamp).toLocaleString()}</td>
+                            <td>${round.total_cartelas}</td>
+                            <td>${round.total_pool} ETB</td>
+                            <td>${round.winner_reward} ETB</td>
+                            <td>${round.admin_commission} ETB</td>
+                            <td>${round.win_percentage}%</td>
+                            <td>${round.winners ? JSON.parse(round.winners).length : 0}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+// View round details
+async function viewRoundDetails(roundId) {
+    try {
+        const response = await fetch(`/api/reports/round/${roundId}`, {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.round) {
+            showRoundDetailsModal(data.round);
+        }
+    } catch (error) {
+        console.error('View round details error:', error);
+        showError('Failed to load round details');
+    }
+}
+
+// Show round details modal
+function showRoundDetailsModal(round) {
+    const winners = round.winners ? JSON.parse(round.winners) : [];
+    const winnerCartelas = round.winner_cartelas ? JSON.parse(round.winner_cartelas) : [];
+    
+    const modalHtml = `
+        <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3>Round #${round.round_number} Details</h3>
+                    <span class="modal-close" onclick="closeModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="round-info-grid">
+                        <div><strong>Date:</strong> ${new Date(round.timestamp).toLocaleString()}</div>
+                        <div><strong>Total Players:</strong> ${round.total_players}</div>
+                        <div><strong>Total Cartelas:</strong> ${round.total_cartelas}</div>
+                        <div><strong>Total Pool:</strong> ${round.total_pool} ETB</div>
+                        <div><strong>Winner Reward:</strong> ${round.winner_reward} ETB</div>
+                        <div><strong>Commission:</strong> ${round.admin_commission} ETB</div>
+                        <div><strong>Win Percentage:</strong> ${round.win_percentage}%</div>
+                    </div>
+                    ${winners.length > 0 ? `
+                        <div class="winners-section">
+                            <h4>🏆 Winners</h4>
+                            ${winners.map((winner, i) => `
+                                <div class="winner-detail">
+                                    <strong>${winner}</strong>
+                                    ${winnerCartelas[i] ? `
+                                        <div>Cartela: ${winnerCartelas[i].cartelaId}</div>
+                                        <div>Pattern: ${winnerCartelas[i].pattern || winnerCartelas[i].winningLines?.join(', ')}</div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p>No winners this round</p>'}
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal()" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeModal() {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) modal.remove();
+}
+
+// Export reports
+async function exportReports() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    
+    if (!startDate || !endDate) {
+        showError('Please select start and end dates');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/reports/export/range?startDate=${startDate}&endDate=${endDate}`, {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bingo_report_${startDate}_to_${endDate}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showSuccess('Export started!');
+    } catch (error) {
+        console.error('Export error:', error);
+        showError('Failed to export reports');
+    }
+}
+
+// ==================== PLAYER MANAGEMENT ====================
+
+// Search players
+async function searchPlayers() {
+    const searchTerm = document.getElementById('playerSearch').value.trim();
+    
+    if (searchTerm.length < 2) {
+        showError('Enter at least 2 characters to search');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/admin/search-players', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${adminToken}`
+            },
+            body: JSON.stringify({ search: searchTerm })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayPlayers(data.players);
+        } else {
+            showError(data.message || 'No players found');
+        }
+    } catch (error) {
+        console.error('Search players error:', error);
+        showError('Failed to search players');
+    }
+}
+
+// Display players
+function displayPlayers(players) {
+    const container = document.getElementById('playersContainer');
+    
+    if (!players || players.length === 0) {
+        container.innerHTML = '<p class="no-data">No players found</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div class="players-grid">
+            ${players.map(player => `
+                <div class="player-card" onclick="viewPlayerDetails(${player.telegram_id})">
+                    <div class="player-avatar">
+                        ${getAvatarInitials(player.username || 'Player')}
+                    </div>
+                    <div class="player-info">
+                        <div class="player-name">${escapeHtml(player.username || 'Unknown')}</div>
+                        <div class="player-detail">🆔 ID: ${player.telegram_id}</div>
+                        <div class="player-detail">📱 Phone: ${player.phone || 'Not registered'}</div>
+                        <div class="player-balance">💰 ${parseFloat(player.balance || 0).toFixed(2)} ETB</div>
+                        <div class="player-detail">💳 Deposited: ${parseFloat(player.total_deposited || 0).toFixed(2)} ETB</div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Get avatar initials
+function getAvatarInitials(name) {
+    if (!name) return '👤';
+    const words = name.split(' ');
+    if (words.length >= 2) {
+        return (words[0][0] + words[1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+}
+
+// View player details
+async function viewPlayerDetails(telegramId) {
+    currentViewingPlayer = telegramId;
+    
+    try {
+        const response = await fetch(`/api/admin/player/${telegramId}`, {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.player) {
+            showPlayerDetailsModal(data.player);
+        } else {
+            showError('Failed to load player details');
+        }
+    } catch (error) {
+        console.error('View player error:', error);
+        showError('Failed to load player details');
+    }
+}
+
+// Show player details modal
+function showPlayerDetailsModal(player) {
+    const modalHtml = `
+        <div class="modal-overlay" onclick="closePlayerModal()">
+            <div class="modal player-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3>👤 Player Details</h3>
+                    <span class="modal-close" onclick="closePlayerModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="player-detail-card">
+                        <div class="player-detail-row">
+                            <strong>Username:</strong> ${escapeHtml(player.username || 'N/A')}
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Telegram ID:</strong> ${player.telegram_id}
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Phone:</strong> ${player.phone || 'Not registered'}
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Language:</strong> ${player.language === 'am' ? 'አማርኛ' : 'English'}
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Balance:</strong> <span class="player-balance-large">${parseFloat(player.balance || 0).toFixed(2)} ETB</span>
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Total Deposited:</strong> ${parseFloat(player.total_deposited || 0).toFixed(2)} ETB
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Total Withdrawn:</strong> ${parseFloat(player.total_withdrawn || 0).toFixed(2)} ETB
+                        </div>
+                        <div class="player-detail-row">
+                            <strong>Registered:</strong> ${new Date(player.created_at).toLocaleString()}
+                        </div>
+                        ${player.currentGame && player.currentGame.online ? `
+                            <div class="player-detail-row">
+                                <strong>Status:</strong> <span class="online-status">🟢 Online</span>
+                            </div>
+                            <div class="player-detail-row">
+                                <strong>Current Cartelas:</strong> ${player.currentGame.selectedCartelas?.join(', ') || 'None'}
+                            </div>
+                        ` : '<div class="player-detail-row"><strong>Status:</strong> ⚫ Offline</div>'}
+                    </div>
+                    <div class="action-buttons">
+                        <button onclick="adjustBalance(${player.telegram_id}, 10)" class="btn btn-success">+10 ETB</button>
+                        <button onclick="adjustBalance(${player.telegram_id}, 50)" class="btn btn-success">+50 ETB</button>
+                        <button onclick="adjustBalance(${player.telegram_id}, 100)" class="btn btn-success">+100 ETB</button>
+                        <button onclick="adjustBalance(${player.telegram_id}, -10)" class="btn btn-warning">-10 ETB</button>
+                        <button onclick="adjustBalance(${player.telegram_id}, -50)" class="btn btn-warning">-50 ETB</button>
+                        <button onclick="viewPlayerTransactions(${player.telegram_id})" class="btn btn-info">📜 Transactions</button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closePlayerModal()" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closePlayerModal() {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) modal.remove();
+    currentViewingPlayer = null;
+}
+
+// Adjust player balance
+async function adjustBalance(telegramId, amount) {
+    const action = amount >= 0 ? 'add' : 'deduct';
+    const absAmount = Math.abs(amount);
+    
+    if (confirm(`${action.toUpperCase()} ${absAmount} ETB for this player?`)) {
+        try {
+            const response = await fetch('/api/admin/adjust-balance', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${adminToken}`
+                },
+                body: JSON.stringify({ telegram_id: telegramId, amount: amount })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showSuccess(`Balance adjusted by ${amount} ETB. New balance: ${data.new_balance} ETB`);
+                closePlayerModal();
+                viewPlayerDetails(telegramId);
+            } else {
+                showError(data.message || 'Failed to adjust balance');
+            }
+        } catch (error) {
+            console.error('Adjust balance error:', error);
+            showError('Failed to adjust balance');
+        }
+    }
+}
+
+// View player transactions
+async function viewPlayerTransactions(telegramId) {
+    try {
+        const response = await fetch(`/api/admin/player-transactions/${telegramId}`, {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showTransactionsModal(data.transactions, data.playerName);
+        }
+    } catch (error) {
+        console.error('View transactions error:', error);
+        showError('Failed to load transactions');
+    }
+}
+
+// Show transactions modal
+function showTransactionsModal(transactions, playerName) {
+    const modalHtml = `
+        <div class="modal-overlay" onclick="closeTransactionsModal()">
+            <div class="modal transactions-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3>📜 Transaction History: ${escapeHtml(playerName)}</h3>
+                    <span class="modal-close" onclick="closeTransactionsModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="table-wrapper">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Amount</th>
+                                    <th>Cartela</th>
+                                    <th>Round</th>
+                                    <th>Note</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${transactions.map(tx => `
+                                    <tr>
+                                        <td>${new Date(tx.timestamp).toLocaleString()}</td>
+                                        <td><span class="tx-type ${tx.type}">${tx.type}</span></td>
+                                        <td class="${tx.amount >= 0 ? 'text-success' : 'text-danger'}">${tx.amount >= 0 ? '+' : ''}${tx.amount} ETB</td>
+                                        <td>${tx.cartela || '-'}</td>
+                                        <td>${tx.round || '-'}</td>
+                                        <td>${tx.note || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeTransactionsModal()" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeTransactionsModal() {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) modal.remove();
+}
+
+// ==================== ACTIVE PLAYERS ====================
+
+// Load active players
+async function loadActivePlayers() {
+    try {
+        const response = await fetch('/api/admin/players', {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayActivePlayers(data.players);
+        }
+    } catch (error) {
+        console.error('Failed to load active players:', error);
+    }
+}
+
+// Display active players
+function displayActivePlayers(players) {
+    const container = document.getElementById('activePlayersContainer');
+    
+    if (!players || players.length === 0) {
+        container.innerHTML = '<p class="no-data">No active players</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div class="active-players-list">
+            ${players.map(player => `
+                <div class="active-player" onclick="viewPlayerDetails(${player.telegramId})">
+                    <div class="active-player-info">
+                        <span class="active-player-name">🎮 ${escapeHtml(player.username || 'Player')}</span>
+                        <span class="active-player-cartelas">🎯 Cartelas: ${player.selectedCount || 0}</span>
+                        <span class="active-player-balance">💰 ${(player.balance || 0).toFixed(2)} ETB</span>
+                    </div>
+                    <div class="active-player-cartelas-list">
+                        ${player.selectedCartelas?.map(c => `<span class="cartela-badge">${c}</span>`).join('') || 'No cartelas selected'}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 // ==================== SOUND SETTINGS ====================
-function loadSoundPackSelection() {
-    const saved = localStorage.getItem('soundPack');
-    if (saved) {
-        document.getElementById('soundPackSelect').value = saved;
-    }
-}
 
-function applySoundPack() {
-    const pack = document.getElementById('soundPackSelect').value;
-    localStorage.setItem('soundPack', pack);
-    showMessage(`Sound pack set to ${pack}. It will be used on the player page.`, 'success');
+// Change sound pack (admin preview)
+function changeSoundPack(packName) {
+    localStorage.setItem('adminSoundPack', packName);
+    showSuccess(`Sound pack changed to ${packName}`);
+    
+    // Play preview sound
+    const preview = new Audio(`/sounds/${packName}/win.mp3`);
+    preview.play().catch(e => console.log('Preview error:', e));
+    
+    // Update active button styling
+    document.querySelectorAll('.sound-pack-btn').forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(packName.replace('pack', ''))) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
 }
 
 // ==================== UTILITIES ====================
-function showMessage(msg, type = 'info') {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `action-message ${type}`;
-    msgDiv.innerText = msg;
-    document.querySelector('.admin-container').prepend(msgDiv);
-    setTimeout(() => msgDiv.remove(), 3000);
+
+// Start live updates
+function startLiveUpdates() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    
+    refreshInterval = setInterval(() => {
+        loadDashboard();
+        loadActivePlayers();
+    }, 5000);
 }
 
-// ==================== INITIALIZE DATE INPUTS ====================
-updateDateInputs();
+// Show tab
+function showTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(tabName).classList.add('active');
+    
+    // Update button active state
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(tabName)) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Refresh data if needed
+    if (tabName === 'players') {
+        loadActivePlayers();
+    }
+    if (tabName === 'reports') {
+        const today = new Date();
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        
+        const startDate = document.getElementById('startDate');
+        const endDate = document.getElementById('endDate');
+        if (startDate && !startDate.value) {
+            startDate.value = weekAgo.toISOString().split('T')[0];
+        }
+        if (endDate && !endDate.value) {
+            endDate.value = today.toISOString().split('T')[0];
+        }
+    }
+}
+
+// Show success message
+function showSuccess(message) {
+    showToast(message, 'success');
+}
+
+// Show error message
+function showError(message) {
+    showToast(message, 'error');
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+        <div class="toast-content">${message}</div>
+        <div class="toast-progress"></div>
+    `;
+    
+    let toastContainer = document.querySelector('.toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+    
+    toastContainer.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Escape HTML
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+// ==================== INITIALIZATION ====================
+
+// Initialize admin panel
+document.addEventListener('DOMContentLoaded', () => {
+    // Check for existing token
+    const savedToken = localStorage.getItem('adminToken');
+    if (savedToken) {
+        adminToken = savedToken;
+        // Verify token is still valid
+        fetch('/api/admin/stats', {
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+        }).then(response => {
+            if (response.status === 401) {
+                logout();
+            } else {
+                showAdminPanel();
+                startLiveUpdates();
+            }
+        }).catch(() => logout());
+    }
+    
+    // Set default dates for reports
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    const startDateInput = document.getElementById('startDate');
+    const endDateInput = document.getElementById('endDate');
+    
+    if (startDateInput) {
+        startDateInput.value = weekAgo.toISOString().split('T')[0];
+    }
+    if (endDateInput) {
+        endDateInput.value = today.toISOString().split('T')[0];
+    }
+    
+    // Enter key for login
+    const passwordInput = document.getElementById('adminPassword');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') adminLogin();
+        });
+    }
+    
+    // Enter key for player search
+    const playerSearch = document.getElementById('playerSearch');
+    if (playerSearch) {
+        playerSearch.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchPlayers();
+        });
+    }
+    
+    // Add CSS for new components
+    const style = document.createElement('style');
+    style.textContent = `
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toast {
+            background: #1e1e2f;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            min-width: 250px;
+            animation: slideIn 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .toast.success { background: linear-gradient(135deg, #00b09b, #96c93d); }
+        .toast.error { background: linear-gradient(135deg, #ff6b6b, #ee5a24); }
+        .toast.info { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .toast.fade-out {
+            animation: fadeOut 0.3s forwards;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        .player-card {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .player-card:hover {
+            transform: translateY(-3px);
+        }
+        .cartela-badge {
+            display: inline-block;
+            background: rgba(255,215,0,0.2);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            margin: 2px;
+        }
+        .tx-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .tx-type.win { background: #4caf50; color: white; }
+        .tx-type.bet { background: #ff9800; color: white; }
+        .tx-type.refund { background: #2196f3; color: white; }
+        .online-status { color: #4caf50; }
+        .report-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #1e1e2f, #16162a);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .summary-label {
+            font-size: 12px;
+            opacity: 0.7;
+            display: block;
+        }
+        .summary-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffd966;
+        }
+    `;
+    document.head.appendChild(style);
+});

@@ -33,12 +33,42 @@ function generateShuffledNumbers() {
     return numbers;
 }
 
+/**
+ * Broadcast game state to all connected clients
+ */
+function broadcastGameState(io) {
+    const playersList = gameState.getAllPlayers();
+    io.emit("gameState", {
+        status: gameState.gameState.status,
+        round: gameState.gameState.round,
+        timer: gameState.gameState.timer,
+        drawnNumbers: gameState.gameState.drawnNumbers,
+        playersCount: gameState.getTotalPlayersCount(),
+        players: playersList,
+        winPercentage: gameState.getWinPercentage(),
+        totalBet: gameState.gameState.totalBet,
+        winnerReward: gameState.gameState.winnerReward
+    });
+}
+
+/**
+ * Broadcast timer update
+ */
+function broadcastTimer(io) {
+    io.emit("timerUpdate", {
+        seconds: gameState.gameState.timer,
+        round: gameState.gameState.round,
+        formatted: formatTime(gameState.gameState.timer),
+        phase: gameState.gameState.status
+    });
+}
+
 // ==================== ROUND PROGRESSION ====================
 
 /**
  * Start the selection phase (players pick cartelas)
  */
-function startSelectionPhase(io, broadcastGameState, broadcastTimer) {
+function startSelectionPhase(io) {
     gameState.clearAllTimers();
     gameState.setGameStatus("selection");
     gameState.setGameTimer(config.SELECTION_TIME);
@@ -68,11 +98,16 @@ function startSelectionPhase(io, broadcastGameState, broadcastTimer) {
             });
         }
         
+        // Play countdown sound for last 3 seconds
+        if (newTimer <= 3 && newTimer > 0) {
+            io.emit("countdownTick", { seconds: newTimer });
+        }
+        
         // Time's up - start active game
         if (newTimer <= 0) {
             clearInterval(timer);
             gameState.setSelectionTimer(null);
-            startActiveGame(io, broadcastGameState);
+            startActiveGame(io);
         }
     }, 1000);
     
@@ -82,7 +117,7 @@ function startSelectionPhase(io, broadcastGameState, broadcastTimer) {
 /**
  * Start the active game phase (drawing numbers)
  */
-function startActiveGame(io, broadcastGameState) {
+function startActiveGame(io) {
     gameState.setGameStatus("active");
     gameState.clearDrawnNumbers();
     gameState.clearWinners();
@@ -137,7 +172,7 @@ function startActiveGame(io, broadcastGameState) {
         if (currentNumberIndex >= currentNumbers.length) {
             clearInterval(drawTimer);
             gameState.setDrawTimer(null);
-            endRound(io, [], broadcastGameState);
+            endRound(io, []);
             return;
         }
         
@@ -149,7 +184,8 @@ function startActiveGame(io, broadcastGameState) {
             number: number,
             letter: getBingoLetter(number),
             drawnCount: gameState.gameState.drawnNumbers.length,
-            remaining: 75 - gameState.gameState.drawnNumbers.length
+            remaining: 75 - gameState.gameState.drawnNumbers.length,
+            numbers: gameState.gameState.drawnNumbers
         });
         
         broadcastGameState(io);
@@ -159,7 +195,7 @@ function startActiveGame(io, broadcastGameState) {
         if (winners.length > 0 && gameState.gameState.winners.length === 0) {
             clearInterval(drawTimer);
             gameState.setDrawTimer(null);
-            endRound(io, winners, broadcastGameState);
+            endRound(io, winners);
         }
     }, config.DRAW_INTERVAL);
     
@@ -168,11 +204,10 @@ function startActiveGame(io, broadcastGameState) {
 
 /**
  * Check for winners among all players
- * Returns array of winner socket IDs with their winning cartela details
+ * Returns array of winner objects with their winning cartela details
  */
 function checkForWinners() {
     const winners = [];
-    const winnerDetails = [];
     const drawnNumbers = gameState.gameState.drawnNumbers;
     
     for (const [socketId, player] of gameState.gameState.players) {
@@ -180,28 +215,29 @@ function checkForWinners() {
         if (gameState.gameState.winners.includes(socketId)) continue;
         
         for (const cartelaId of player.selectedCartelas) {
-            const { won, winningLines } = checkBingoWin(cartelaId, drawnNumbers);
+            const { won, winningLines, pattern } = checkBingoWin(cartelaId, drawnNumbers);
             if (won) {
-                winners.push(socketId);
-                winnerDetails.push({
+                winners.push({
                     socketId,
                     cartelaId,
                     winningLines,
+                    pattern: pattern || winningLines[0],
                     username: player.username,
-                    telegramId: player.telegramId
+                    telegramId: player.telegramId,
+                    balance: player.balance
                 });
                 break; // One winning cartela is enough
             }
         }
     }
     
-    return winnerDetails;
+    return winners;
 }
 
 /**
  * End the current round and distribute rewards
  */
-async function endRound(io, winnerDetails, broadcastGameState, saveRoundCallback, addBalanceCallback, logTransactionCallback) {
+async function endRound(io, winnerDetails) {
     if (gameState.gameState.status !== "active") return;
     
     gameState.clearDrawTimer();
@@ -224,62 +260,30 @@ async function endRound(io, winnerDetails, broadcastGameState, saveRoundCallback
         winnerCartelas.push({
             username: player.username,
             cartelaId: winner.cartelaId,
-            winningLines: winner.winningLines
+            winningLines: winner.winningLines,
+            pattern: winner.pattern
         });
-        
-        // Update player stats
-        player.balance += perWinner;
-        player.totalWon = (player.totalWon || 0) + perWinner;
-        player.gamesWon = (player.gamesWon || 0) + 1;
         
         // Notify winner
         io.to(winner.socketId).emit("youWon", {
             amount: perWinner,
             cartelaId: winner.cartelaId,
             winningLines: winner.winningLines,
-            newBalance: player.balance,
+            pattern: winner.pattern,
+            newBalance: player.balance + perWinner,
             message: `🎉 You won ${perWinner.toFixed(2)} ETB!`
         });
         
-        // Update balance via bot API
-        if (addBalanceCallback) {
-            try {
-                const result = await addBalanceCallback(player.telegramId, perWinner, `won round ${gameState.gameState.round}`);
-                if (result.success) {
-                    player.balance = result.new_balance;
-                }
-            } catch (err) {
-                console.error("Failed to add winnings:", err);
-            }
-        }
-        
-        // Log transaction
-        if (logTransactionCallback) {
-            await logTransactionCallback(player.telegramId, player.username, "win", perWinner, winner.cartelaId, gameState.gameState.round, "Round win");
-        }
+        // Update player stats (balance will be updated via bot API)
+        player.totalWon = (player.totalWon || 0) + perWinner;
+        player.gamesWon = (player.gamesWon || 0) + 1;
     }
     
-    // Update total played for all players
+    // Update total played for all players who had cartelas
     for (const [socketId, player] of gameState.gameState.players) {
         if (player.selectedCartelas.length > 0) {
             player.totalPlayed = (player.totalPlayed || 0) + 1;
         }
-    }
-    
-    // Save round to database
-    if (saveRoundCallback) {
-        await saveRoundCallback({
-            roundNumber: gameState.gameState.round,
-            totalPlayers: gameState.getActivePlayersCount(),
-            totalCartelas: gameState.getTotalSelectedCartelasCount(),
-            totalPool: gameState.gameState.totalBet,
-            winnerReward: gameState.gameState.winnerReward,
-            adminCommission: gameState.gameState.adminCommission,
-            winners: winnerNames,
-            winnerCartelas: winnerCartelas,
-            winPercentage: getWinPercentage(),
-            timestamp: new Date().toISOString()
-        });
     }
     
     // Announce round end
@@ -287,10 +291,11 @@ async function endRound(io, winnerDetails, broadcastGameState, saveRoundCallback
         winners: winnerNames,
         winnerCartelas: winnerCartelas,
         winnerCount: winnerCount,
-        winnerReward: perWinner,
+        prizePerWinner: perWinner,
+        totalPrize: gameState.gameState.winnerReward,
         totalPool: gameState.gameState.totalBet,
-        adminCommission: gameState.gameState.adminCommission,
-        winPercentage: getWinPercentage(),
+        commission: gameState.gameState.adminCommission,
+        winPercentage: gameState.getWinPercentage(),
         round: gameState.gameState.round,
         message: winnerCount > 0 
             ? `🎉 BINGO! Winners: ${winnerNames.join(", ")}. Each wins ${perWinner.toFixed(2)} ETB!`
@@ -300,13 +305,13 @@ async function endRound(io, winnerDetails, broadcastGameState, saveRoundCallback
     broadcastGameState(io);
     
     // Schedule next round
-    scheduleNextRound(io, broadcastGameState, broadcastTimer);
+    scheduleNextRound(io);
 }
 
 /**
  * Schedule the next round with countdown
  */
-function scheduleNextRound(io, broadcastGameState, broadcastTimer) {
+function scheduleNextRound(io) {
     let countdown = config.NEXT_ROUND_DELAY / 1000;
     
     const countdownInterval = setInterval(() => {
@@ -318,7 +323,7 @@ function scheduleNextRound(io, broadcastGameState, broadcastTimer) {
     }, 1000);
     
     const timer = setTimeout(() => {
-        resetForNextRound(io, broadcastGameState, broadcastTimer);
+        resetForNextRound(io);
         gameState.setNextRoundTimer(null);
     }, config.NEXT_ROUND_DELAY);
     
@@ -328,33 +333,85 @@ function scheduleNextRound(io, broadcastGameState, broadcastTimer) {
 /**
  * Reset game state for the next round
  */
-function resetForNextRound(io, broadcastGameState, broadcastTimer) {
+function resetForNextRound(io) {
     gameState.clearAllPlayerCartelas();
     gameState.clearAllCartelas();
-    gameState.clearActiveSelectionsForRound(gameState.gameState.round);
     gameState.setGameRound(gameState.gameState.round + 1);
     gameState.resetForNewRound();
     
     broadcastGameState(io);
     broadcastTimer(io);
     
-    io.emit("nextRound", {
+    io.emit("newRound", {
         round: gameState.gameState.round,
         timer: config.SELECTION_TIME,
+        winPercentage: gameState.getWinPercentage(),
         message: `🎲 Round ${gameState.gameState.round} starting! Select up to ${config.MAX_CARTELAS} cartelas within ${config.SELECTION_TIME} seconds.`
     });
     
-    startSelectionPhase(io, broadcastGameState, broadcastTimer);
+    startSelectionPhase(io);
+}
+
+/**
+ * Force end current round (admin action)
+ */
+function forceEndRound(io) {
+    if (gameState.gameState.status === "active") {
+        gameState.clearDrawTimer();
+        endRound(io, []);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Force start next round (admin action)
+ */
+function forceStartRound(io) {
+    if (gameState.gameState.status === "selection") {
+        gameState.clearSelectionTimer();
+        startActiveGame(io);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Get current round number
+ */
+function getCurrentRound() {
+    return gameState.gameState.round;
+}
+
+/**
+ * Get current round status
+ */
+function getRoundStatus() {
+    return {
+        round: gameState.gameState.round,
+        status: gameState.gameState.status,
+        timer: gameState.gameState.timer,
+        drawnNumbers: gameState.gameState.drawnNumbers.length,
+        winners: gameState.gameState.winners.length,
+        totalBet: gameState.gameState.totalBet,
+        winnerReward: gameState.gameState.winnerReward
+    };
 }
 
 // ==================== EXPORTS ====================
 module.exports = {
     formatTime,
     generateShuffledNumbers,
+    broadcastGameState,
+    broadcastTimer,
     startSelectionPhase,
     startActiveGame,
     checkForWinners,
     endRound,
     scheduleNextRound,
     resetForNextRound,
+    forceEndRound,
+    forceStartRound,
+    getCurrentRound,
+    getRoundStatus,
 };
