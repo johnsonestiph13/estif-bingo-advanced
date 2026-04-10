@@ -1486,7 +1486,6 @@ process.on("SIGINT", gracefulShutdown);
 
 // ==================== START SERVER ====================
 async function startServer() {
-    // ✅ FIX: Define PORT from environment variable
     const PORT = process.env.PORT || 3000;
     
     await initializeDatabase();
@@ -1497,7 +1496,8 @@ async function startServer() {
     const PLAYER_URL = process.env.PLAYER_URL || "https://estif-bingo-advanced-1.onrender.com/player.html";
     const ADMIN_URL = process.env.ADMIN_URL || "https://estif-bingo-advanced-1.onrender.com/admin.html";
     
-    server.listen(PORT, () => {
+    // ✅ FIX: Bind to 0.0.0.0 to accept connections from outside (Render requirement)
+    server.listen(PORT, '0.0.0.0', () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (${TOTAL_CARTELAS} CARTELAS) 🎲    ║
