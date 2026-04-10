@@ -1,5 +1,6 @@
 const express = require("express");
 const http = require("http");
+const https = require("https");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
@@ -21,6 +22,10 @@ for (const env of requiredEnv) {
     }
 }
 
+// ==================== KEEP-ALIVE HTTP AGENTS (PERFORMANCE) ====================
+const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
+const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
+
 // ==================== MIGRATION FLAG ====================
 const SKIP_AUTO_MIGRATIONS = process.env.MANUAL_MIGRATION === "true";
 
@@ -37,10 +42,10 @@ const io = new Server(server, {
 
 // ==================== MIDDLEWARE ====================
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
-app.use(compression());
+app.use(compression({ level: 6, threshold: 512 }));
 
 // Rate limiting for API endpoints
 const apiLimiter = rateLimit({
@@ -56,18 +61,22 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true
 });
 
-// ==================== BOT API CLIENT ====================
+// ==================== BOT API CLIENT (WITH KEEP-ALIVE) ====================
 const BOT_API_URL = process.env.BOT_API_URL;
 const API_SECRET = process.env.API_SECRET;
 
 async function callBotAPI(endpoint, body) {
-    const response = await fetch(`${BOT_API_URL}${endpoint}`, {
+    const url = `${BOT_API_URL}${endpoint}`;
+    const agent = url.startsWith("https") ? httpsAgent : httpAgent;
+    const response = await fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-API-Key': API_SECRET
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        agent: agent,
+        timeout: 10000
     });
     if (!response.ok) {
         throw new Error(`Bot API error: ${response.status}`);
@@ -76,12 +85,16 @@ async function callBotAPI(endpoint, body) {
 }
 
 async function callBotAPIGet(endpoint) {
-    const response = await fetch(`${BOT_API_URL}${endpoint}`, {
+    const url = `${BOT_API_URL}${endpoint}`;
+    const agent = url.startsWith("https") ? httpsAgent : httpAgent;
+    const response = await fetch(url, {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',
             'X-API-Key': API_SECRET
-        }
+        },
+        agent: agent,
+        timeout: 10000
     });
     if (!response.ok) {
         throw new Error(`Bot API error: ${response.status}`);
@@ -89,13 +102,13 @@ async function callBotAPIGet(endpoint) {
     return response.json();
 }
 
-// ==================== POSTGRESQL DATABASE ====================
+// ==================== POSTGRESQL DATABASE (OPTIMISED) ====================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000
+    max: 30,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 3000
 });
 
 // ==================== MIGRATION SYSTEM ====================
@@ -324,16 +337,13 @@ function generateRandomGrid() {
 }
 
 function getCartelaGrid(cartelaId) {
-    // First, try exact match
     if (cartelasData[cartelaId]) {
         return cartelasData[cartelaId].grid;
     }
-    // Try to find by prefix (e.g., "B1" instead of "B1_001")
     const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
     if (matchingKey) {
         return cartelasData[matchingKey].grid;
     }
-    // Fallback: generate random grid
     console.warn(`Cartela ${cartelaId} not found, generating random grid`);
     return generateRandomGrid();
 }
@@ -376,7 +386,8 @@ let activeSessions = new Map();
 async function loadWinPercentage() {
     try {
         const response = await fetch(`${BOT_API_URL}/api/commission`, {
-            headers: { 'X-API-Key': API_SECRET }
+            headers: { 'X-API-Key': API_SECRET },
+            agent: BOT_API_URL.startsWith("https") ? httpsAgent : httpAgent
         });
         if (response.ok) {
             const json = await response.json();
@@ -406,18 +417,16 @@ function checkBingoWin(cartelaId, drawnNumbers) {
     if (!grid) return { won: false, winningLines: [] };
     
     const drawnSet = new Set(drawnNumbers);
-    drawnSet.add(0); // FREE space is represented as 0
+    drawnSet.add(0);
     
     const lines = [];
     
-    // Check rows
     for (let r = 0; r < 5; r++) {
         if (grid[r].every(v => drawnSet.has(v))) {
             lines.push(`Row ${r+1}`);
         }
     }
     
-    // Check columns
     for (let c = 0; c < 5; c++) {
         let win = true;
         for (let r = 0; r < 5; r++) {
@@ -429,7 +438,6 @@ function checkBingoWin(cartelaId, drawnNumbers) {
         if (win) lines.push(`Column ${c+1}`);
     }
     
-    // Check diagonals
     let d1 = true, d2 = true;
     for (let i = 0; i < 5; i++) {
         if (!drawnSet.has(grid[i][i])) d1 = false;
@@ -584,7 +592,6 @@ async function startActiveGame() {
         message: `🎯 ${totalCartelas} cartelas selected! Total pool: ${totalBetAmount} ETB. Winner takes ${winnerReward} ETB!`
     });
     
-    // Shuffle numbers 1-75
     const numbers = Array.from({ length: 75 }, (_, i) => i+1);
     for (let i = numbers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i+1));
@@ -615,7 +622,6 @@ async function startActiveGame() {
         
         broadcastGameState();
         
-        // Check for winners
         const newWinners = [], details = [];
         for (const [sid, pl] of gameState.players) {
             if (pl.selectedCartelas.length && !gameState.winners.includes(sid)) {
@@ -662,7 +668,6 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
                 });
             }
             
-            // Send win notification to winner
             io.to(sid).emit("youWon", { 
                 amount: perWinner, 
                 cartelaId: det?.cartelaId, 
@@ -672,7 +677,6 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
                 message: `🎉 You won ${perWinner.toFixed(2)} ETB!` 
             });
             
-            // Update balance via bot API
             try {
                 const result = await callBotAPI("/api/add", {
                     telegram_id: pl.telegramId,
@@ -695,7 +699,6 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
         }
     }
     
-    // Save round to database
     await pool.query(`
         INSERT INTO game_rounds (round_number, total_players, total_cartelas, total_pool, winner_reward, admin_commission, winners, winner_cartelas, win_percentage, timestamp)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -712,7 +715,6 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
         new Date().toISOString()
     ]);
     
-    // Broadcast round ended
     io.emit("roundEnded", {
         winners: winnerNames,
         winnerCartelas: winnerCartelas,
@@ -746,19 +748,15 @@ function scheduleNextRound() {
 }
 
 async function resetForNextRound() {
-    // Clear player selections
     for (const [_, pl] of gameState.players) {
         pl.selectedCartelas = [];
     }
     
-    // Clear global cartela tracking
     globalTakenCartelas.clear();
     globalTotalSelectedCartelas = 0;
     
-    // Clear database selections
     await pool.query("DELETE FROM active_round_selections WHERE round_number = $1", [gameState.round]);
     
-    // Increment round and reset state
     gameState.round++;
     gameState.status = "selection";
     gameState.timer = SELECTION_TIME;
@@ -826,10 +824,7 @@ async function recoverFromCrash() {
 
 // ==================== ADMIN AUTH ====================
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "johnsonestiph13@gmail.com";
-let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
-if (!ADMIN_PASSWORD_HASH) {
-    ADMIN_PASSWORD_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ4Q6Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5wZ5Z5";
-}
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "$2a$10$ZfdgMySJf9kxQpXbdaZVKORiIVkaHFivZK/OxV/Cv7FA7KJjYSDma";
 
 app.post("/api/admin/login", authLimiter, async (req, res) => {
     const { email, password } = req.body;
@@ -840,7 +835,8 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
     if (!isValid) {
         return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-    const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "24h" });
+    // ✅ Admin token expires in 7 days (changed from 24 hours)
+    const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "7d" });
     adminTokens.set(token, Date.now());
     res.json({ success: true, token });
 });
@@ -1102,11 +1098,9 @@ app.post("/api/exchange-code", async (req, res) => {
     }
 });
 
-// UPDATED: Cartela endpoint that works with string IDs like "B1_001", "O15_188"
 app.get("/api/cartela/:id", (req, res) => {
     const cartelaId = req.params.id;
     
-    // Check if cartela exists in our loaded data
     if (cartelasData[cartelaId]) {
         return res.json({ 
             success: true, 
@@ -1115,7 +1109,6 @@ app.get("/api/cartela/:id", (req, res) => {
         });
     }
     
-    // Try to find by prefix (e.g., "B1" instead of "B1_001")
     const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
     if (matchingKey) {
         return res.json({ 
@@ -1125,7 +1118,6 @@ app.get("/api/cartela/:id", (req, res) => {
         });
     }
     
-    // Cartela not found
     res.status(404).json({ 
         success: false, 
         message: `Cartela ${cartelaId} not found` 
@@ -1168,13 +1160,11 @@ io.on("connection", (socket) => {
             
             const { telegram_id, username, balance } = result;
             
-            // Track session for multi-device support
             if (!activeSessions.has(telegram_id)) {
                 activeSessions.set(telegram_id, new Set());
             }
             activeSessions.get(telegram_id).add(socket.id);
             
-            // Check for existing player
             let existingPlayer = null;
             for (const [sid, p] of gameState.players) {
                 if (p.telegramId === telegram_id) {
@@ -1197,7 +1187,6 @@ io.on("connection", (socket) => {
                 };
                 gameState.players.set(socket.id, playerData);
             } else {
-                // Load saved selections from current round
                 let savedSelections = [];
                 for (const [cartela, { telegramId: tid }] of globalTakenCartelas.entries()) {
                     if (tid === telegram_id) savedSelections.push(cartela);
@@ -1215,14 +1204,12 @@ io.on("connection", (socket) => {
                 gameState.players.set(socket.id, playerData);
             }
             
-            // Send authentication success
             socket.emit("authenticated", { 
                 success: true, 
                 user: { telegram_id, username, balance },
                 selectedCartelas: playerData.selectedCartelas 
             });
             
-            // Send current game state
             socket.emit("gameState", {
                 status: gameState.status,
                 round: gameState.round,
@@ -1240,12 +1227,10 @@ io.on("connection", (socket) => {
                 phase: gameState.status
             });
             
-            // Send current balance
             socket.emit("balanceUpdated", { balance, canPlay: balance >= BET_AMOUNT });
             
             broadcastRewardPool();
             
-            // Update players list for all
             io.emit("playersUpdate", {
                 count: gameState.players.size,
                 players: Array.from(gameState.players.values()).map(p => ({
@@ -1275,7 +1260,6 @@ io.on("connection", (socket) => {
                 throw new Error(`❌ Cartela ${data.cartelaId} already taken by ${takenBy.username}`);
             }
             
-            // Deduct balance via bot API
             const deductResult = await callBotAPI("/api/deduct", {
                 telegram_id: player.telegramId,
                 amount: BET_AMOUNT,
@@ -1287,13 +1271,11 @@ io.on("connection", (socket) => {
             
             player.balance = deductResult.new_balance;
             
-            // Reserve cartela
             const reserved = await reserveCartela(data.cartelaId, player.telegramId, player.username);
             if (!reserved) throw new Error("Cartela just taken by someone else");
             
             player.selectedCartelas.push(data.cartelaId);
             
-            // Log transaction
             await logGameTransaction(player.telegramId, player.username, "bet", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela selection");
             
             const selectionData = {
@@ -1342,7 +1324,6 @@ io.on("connection", (socket) => {
                 if (released) {
                     player.selectedCartelas.splice(idx, 1);
                     
-                    // Refund balance
                     const refundResult = await callBotAPI("/api/add", {
                         telegram_id: player.telegramId,
                         amount: BET_AMOUNT,
@@ -1438,7 +1419,6 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         console.log(`🔴 Socket disconnected: ${socket.id}`);
         
-        // Remove from active sessions
         let telegramToRemove = null;
         for (const [tid, sessions] of activeSessions) {
             if (sessions.has(socket.id)) {
@@ -1449,12 +1429,10 @@ io.on("connection", (socket) => {
         }
         if (telegramToRemove) activeSessions.delete(telegramToRemove);
         
-        // Remove player if no other sessions
         const player = gameState.players.get(socket.id);
         if (player) {
             const hasOtherSessions = activeSessions.has(player.telegramId);
             if (!hasOtherSessions) {
-                // Release all cartelas held by this player
                 for (const [cnum, cart] of globalTakenCartelas) {
                     if (cart.telegramId === player.telegramId) {
                         globalTakenCartelas.delete(cnum);
@@ -1496,7 +1474,6 @@ async function startServer() {
     const PLAYER_URL = process.env.PLAYER_URL || "https://estif-bingo-advanced-1.onrender.com/player.html";
     const ADMIN_URL = process.env.ADMIN_URL || "https://estif-bingo-advanced-1.onrender.com/admin.html";
     
-    // ✅ FIX: Bind to 0.0.0.0 to accept connections from outside (Render requirement)
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -1516,6 +1493,8 @@ async function startServer() {
 ║     ✅ ${TOTAL_CARTELAS} unique cartelas loaded from JSON                        ║
 ║     ✅ Multi-device sync support                                          ║
 ║     ✅ Crash recovery with active_round_selections                        ║
+║     ✅ Keep-Alive HTTP Agent for faster bot communication                 ║
+║     ✅ Admin session expires in 7 days (was 24 hours)                     ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
         `);
     }); 
