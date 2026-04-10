@@ -1,4 +1,4 @@
-# db/database.py - COMPLETE UPDATED VERSION WITH FIXES
+# db/database.py - COMPLETE FIXED VERSION WITH AUTO-MIGRATION
 
 import asyncpg
 import logging
@@ -30,9 +30,41 @@ class Database:
             command_timeout=DB_COMMAND_TIMEOUT
         )
         await cls._init_tables()
+        await cls._ensure_columns()  # ← NEW: Force column check
         if not SKIP_AUTO_MIGRATIONS:
             await cls._run_migrations()
         logger.info("✅ Database pool initialized")
+
+    @classmethod
+    async def _ensure_columns(cls):
+        """Forcefully ensure all required columns exist"""
+        async with cls._pool.acquire() as conn:
+            # Get existing columns
+            columns = await conn.fetch("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'users'
+            """)
+            column_names = [col['column_name'] for col in columns]
+            
+            # Define required columns
+            required_columns = {
+                'referral_code': 'TEXT UNIQUE',
+                'referred_by': 'BIGINT',
+                'total_withdrawn': 'DECIMAL(12,2) DEFAULT 0',
+                'total_won': 'DECIMAL(12,2) DEFAULT 0',
+                'games_played': 'INTEGER DEFAULT 0',
+                'games_won': 'INTEGER DEFAULT 0'
+            }
+            
+            # Add missing columns
+            for col_name, col_type in required_columns.items():
+                if col_name not in column_names:
+                    try:
+                        await conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ Added missing column: {col_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not add column {col_name}: {e}")
 
     @classmethod
     async def close_pool(cls):
@@ -55,15 +87,9 @@ class Database:
                     phone TEXT,
                     balance DECIMAL(12,2) DEFAULT 0,
                     total_deposited DECIMAL(12,2) DEFAULT 0,
-                    total_withdrawn DECIMAL(12,2) DEFAULT 0,
-                    total_won DECIMAL(12,2) DEFAULT 0,
-                    games_played INTEGER DEFAULT 0,
-                    games_won INTEGER DEFAULT 0,
                     registered BOOLEAN DEFAULT FALSE,
                     joined_group BOOLEAN DEFAULT FALSE,
                     lang TEXT DEFAULT 'en',
-                    referral_code TEXT UNIQUE,
-                    referred_by BIGINT,
                     created_at TIMESTAMP DEFAULT NOW(),
                     last_seen TIMESTAMP DEFAULT NOW()
                 )
@@ -159,7 +185,6 @@ class Database:
             
             # Create indexes
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
@@ -186,48 +211,7 @@ class Database:
             executed = await conn.fetch("SELECT name FROM migrations")
             executed_set = {row["name"] for row in executed}
             
-            # Check and add missing columns for existing tables
-            try:
-                # Check if referral_code column exists
-                columns = await conn.fetch("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'users'
-                """)
-                column_names = [col['column_name'] for col in columns]
-                
-                if 'referral_code' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE")
-                    logger.info("✅ Added missing column: referral_code")
-                
-                if 'referred_by' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN referred_by BIGINT")
-                    logger.info("✅ Added missing column: referred_by")
-                    
-                if 'total_withdrawn' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN total_withdrawn DECIMAL(12,2) DEFAULT 0")
-                    logger.info("✅ Added missing column: total_withdrawn")
-                    
-                if 'total_won' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN total_won DECIMAL(12,2) DEFAULT 0")
-                    logger.info("✅ Added missing column: total_won")
-                    
-                if 'games_played' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN games_played INTEGER DEFAULT 0")
-                    logger.info("✅ Added missing column: games_played")
-                    
-                if 'games_won' not in column_names:
-                    await conn.execute("ALTER TABLE users ADD COLUMN games_won INTEGER DEFAULT 0")
-                    logger.info("✅ Added missing column: games_won")
-                    
-            except Exception as e:
-                logger.warning(f"Migration check warning: {e}")
-            
             # Add migrations here as needed
-            # if "002_add_leaderboard.sql" not in executed_set:
-            #     await conn.execute("ALTER TABLE users ADD COLUMN games_won INT DEFAULT 0")
-            #     await conn.execute("INSERT INTO migrations (name) VALUES ('002_add_leaderboard.sql')")
-            #     logger.info("✅ Migration 002_add_leaderboard.sql applied")
 
     # ==================== USER OPERATIONS ====================
     
@@ -257,22 +241,13 @@ class Database:
                           phone: str, lang: str = "en") -> None:
         """Create a new user"""
         async with cls._pool.acquire() as conn:
-            # Generate unique referral code (optional)
+            # Generate unique referral code
             referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-            try:
-                await conn.execute("""
-                    INSERT INTO users (telegram_id, username, first_name, last_name, 
-                                       phone, registered, lang, referral_code)
-                    VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7)
-                """, telegram_id, username, first_name, last_name, phone, lang, referral_code)
-            except Exception as e:
-                # If referral_code column doesn't exist, insert without it
-                logger.warning(f"Referral code insertion failed, trying without: {e}")
-                await conn.execute("""
-                    INSERT INTO users (telegram_id, username, first_name, last_name, 
-                                       phone, registered, lang)
-                    VALUES ($1, $2, $3, $4, $5, TRUE, $6)
-                """, telegram_id, username, first_name, last_name, phone, lang)
+            await conn.execute("""
+                INSERT INTO users (telegram_id, username, first_name, last_name, 
+                                   phone, registered, lang, referral_code)
+                VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7)
+            """, telegram_id, username, first_name, last_name, phone, lang, referral_code)
 
     @classmethod
     async def update_user(cls, telegram_id: int, **kwargs) -> None:
@@ -327,24 +302,6 @@ class Database:
                     INSERT INTO game_transactions (telegram_id, type, amount, round, note)
                     VALUES ($1, $2, $3, $4, $5)
                 """, telegram_id, transaction_type, amount, round_id, f"{transaction_type} transaction")
-                
-                # Update totals based on transaction type
-                if transaction_type == 'winning' and amount > 0:
-                    try:
-                        await conn.execute(
-                            "UPDATE users SET total_won = total_won + $1, games_won = games_won + 1 WHERE telegram_id = $2",
-                            amount, telegram_id
-                        )
-                    except Exception:
-                        pass  # Column might not exist yet
-                elif transaction_type == 'cartela_purchase' and amount < 0:
-                    try:
-                        await conn.execute(
-                            "UPDATE users SET games_played = games_played + 1 WHERE telegram_id = $1",
-                            telegram_id
-                        )
-                    except Exception:
-                        pass  # Column might not exist yet
                 
                 return True
 
@@ -403,17 +360,6 @@ class Database:
                     "UPDATE users SET balance = $1 WHERE telegram_id = $2",
                     new_balance, telegram_id
                 )
-                
-                # Update total withdrawn if this is a cashout
-                if reason == "cashout":
-                    try:
-                        await conn.execute(
-                            "UPDATE users SET total_withdrawn = total_withdrawn + $1 WHERE telegram_id = $2",
-                            amount, telegram_id
-                        )
-                    except Exception:
-                        pass  # Column might not exist yet
-                
                 return new_balance
 
     @classmethod
@@ -557,15 +503,6 @@ class Database:
                     logger.error(f"Balance deduction failed for withdrawal {withdrawal_id}: {e}")
                     return None
                 
-                # Update total withdrawn
-                try:
-                    await conn.execute(
-                        "UPDATE users SET total_withdrawn = total_withdrawn + $1 WHERE telegram_id = $2",
-                        amount, telegram_id
-                    )
-                except Exception:
-                    pass  # Column might not exist yet
-                
                 await conn.execute(
                     "UPDATE pending_withdrawals SET status = 'approved', processed_at = NOW() WHERE id = $1",
                     withdrawal_id
@@ -618,7 +555,7 @@ class Database:
         """Search players by username or phone"""
         async with cls._pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT telegram_id, username, phone, balance, total_deposited, total_won, games_played, games_won
+                SELECT telegram_id, username, phone, balance, total_deposited
                 FROM users 
                 WHERE username ILIKE $1 OR phone ILIKE $1
                 ORDER BY balance DESC
