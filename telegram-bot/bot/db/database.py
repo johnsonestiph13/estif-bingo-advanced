@@ -588,7 +588,7 @@ class Database:
             """, telegram_id, limit)
             return [dict(r) for r in rows]
 
-    // ==================== STATISTICS ====================
+    # ==================== STATISTICS ====================
     
     @classmethod
     async def get_total_users_count(cls) -> int:
@@ -604,7 +604,7 @@ class Database:
             row = await conn.fetchrow("SELECT COALESCE(SUM(total_deposited), 0) FROM users")
             return float(row[0]) if row and row[0] else 0.0
 
-    // ==================== HEALTH CHECK ====================
+    # ==================== HEALTH CHECK ====================
     
     @classmethod
     async def health_check(cls) -> bool:
