@@ -1486,6 +1486,9 @@ process.on("SIGINT", gracefulShutdown);
 
 // ==================== START SERVER ====================
 async function startServer() {
+    // ✅ FIX: Define PORT from environment variable
+    const PORT = process.env.PORT || 3000;
+    
     await initializeDatabase();
     await loadWinPercentage();
     setTimeout(() => recoverFromCrash(), 2000);
