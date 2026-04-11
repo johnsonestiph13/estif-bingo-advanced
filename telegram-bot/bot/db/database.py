@@ -1,4 +1,4 @@
-# db/database.py - COMPLETE FIXED VERSION WITH AUTO-MIGRATION
+# db/database.py - COMPLETE FIXED VERSION WITH SSL SUPPORT
 
 import asyncpg
 import logging
@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from decimal import Decimal
 import random
 import string
+import os
 from ..config import (
     DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE, 
     DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
@@ -22,15 +23,19 @@ class Database:
 
     @classmethod
     async def init_pool(cls):
-        """Initialize database connection pool"""
+        """Initialize database connection pool with SSL support for Render"""
+        # Ensure SSL is enabled for production (Render requires SSL)
+        ssl_config = "require" if os.getenv("NODE_ENV") == "production" else None
+        
         cls._pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=DB_MIN_SIZE,
             max_size=DB_MAX_SIZE,
-            command_timeout=DB_COMMAND_TIMEOUT
+            command_timeout=DB_COMMAND_TIMEOUT,
+            ssl=ssl_config  # ✅ CRITICAL FIX: Enable SSL for Render PostgreSQL
         )
         await cls._init_tables()
-        await cls._ensure_columns()  # ← NEW: Force column check
+        await cls._ensure_columns()
         if not SKIP_AUTO_MIGRATIONS:
             await cls._run_migrations()
         logger.info("✅ Database pool initialized")
@@ -107,7 +112,7 @@ class Database:
                     admin_commission DECIMAL(10,2) DEFAULT 0,
                     winners JSONB DEFAULT '[]',
                     winner_cartelas JSONB DEFAULT '[]',
-                    win_percentage INTEGER DEFAULT 75,
+                    win_percentage INTEGER DEFAULT 80,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -170,10 +175,10 @@ class Database:
                 )
             """)
             
-            # Insert default game settings
+            # Insert default game settings (with 80% default win percentage)
             await conn.execute("""
                 INSERT INTO game_settings (key, value, description) VALUES 
-                    ('win_percentage', '75', 'Current game win percentage (70,75,76,80)'),
+                    ('win_percentage', '80', 'Current game win percentage (70,75,76,80)'),
                     ('selection_time', '50', 'Cartela selection time in seconds'),
                     ('draw_interval', '4000', 'Number draw interval in milliseconds'),
                     ('next_round_delay', '6000', 'Delay between rounds in milliseconds'),
@@ -539,9 +544,9 @@ class Database:
 
     @classmethod
     async def get_win_percentage(cls) -> int:
-        """Get current win percentage"""
+        """Get current win percentage (default 80%)"""
         value = await cls.get_setting('win_percentage')
-        return int(value) if value else 75
+        return int(value) if value else 80
 
     @classmethod
     async def set_win_percentage(cls, percentage: int) -> None:
