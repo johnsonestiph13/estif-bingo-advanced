@@ -234,7 +234,7 @@ async function initDatabase() {
                 admin_commission DECIMAL(10,2) DEFAULT 0,
                 winners JSONB,
                 winner_cartelas JSONB,
-                win_percentage INTEGER DEFAULT 75,
+                win_percentage INTEGER DEFAULT 80,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -354,7 +354,7 @@ const DRAW_INTERVAL = parseInt(process.env.DRAW_INTERVAL) || 4000;
 const NEXT_ROUND_DELAY = parseInt(process.env.NEXT_ROUND_DELAY) || 6000;
 const BET_AMOUNT = parseFloat(process.env.BET_AMOUNT) || 10;
 const WIN_PERCENTAGES = [70, 75, 76, 80];
-const DEFAULT_WIN_PERCENTAGE = 75;
+const DEFAULT_WIN_PERCENTAGE = 80;
 const MAX_CARTELAS = 4;
 const TOTAL_CARTELAS = Object.keys(cartelasData).length || 1000;
 
