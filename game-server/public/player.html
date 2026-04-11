@@ -478,7 +478,7 @@
     <div class="stat-card"><div class="stat-label">👥 ONLINE</div><div id="playersCount" class="stat-value">0</div></div>
 </div>
 
-<!-- Cartelas Grid (1-1000) -->
+<!-- Cartelas Grid (1-1000) - Rendered IMMEDIATELY -->
 <div class="cartelas-section">
     <div class="cartelas-title">🎯 Select Your Cartelas</div>
     <div class="cartelas-sub">Cartela IDs: #1 - #1000 (each 10 ETB)</div>
@@ -521,7 +521,7 @@
     let gameStatus = 'selection';
     let currentRound = 1;
     let drawnNumbers = [];
-    let winPercentage = 80;  // ✅ DEFAULT WIN PERCENTAGE CHANGED TO 80%
+    let winPercentage = 80;
     let globalTakenCartelas = new Set();
     let playersList = [];
     let onlineCount = 0;
@@ -547,44 +547,9 @@
     const soundPackSelect = document.getElementById('soundPackSelect');
     const loadingOverlay = document.getElementById('loadingOverlay');
 
-    // ==================== HELPER FUNCTIONS ====================
-    function hideLoading() { if (loadingOverlay) loadingOverlay.style.display = 'none'; }
-    function showLoading() { if (loadingOverlay) loadingOverlay.style.display = 'flex'; }
-
-    function updateBalanceUI() {
-        balanceEl.innerText = myBalance.toFixed(2) + ' ETB';
-        const canPlay = myBalance >= BET_AMOUNT;
-        watchOnlyMsg.style.display = canPlay ? 'none' : 'block';
-    }
-
-    function updateSelectedCountUI() {
-        selectedCountEl.innerText = `${mySelectedCartelas.length}/${MAX_CARTELAS}`;
-    }
-
-    function updateSelectedUI() {
-        document.querySelectorAll('.cartela-card').forEach(card => {
-            const num = parseInt(card.getAttribute('data-id'));
-            const isSelected = mySelectedCartelas.includes(num);
-            const isTaken = globalTakenCartelas.has(num);
-            const btn = card.querySelector('.select-btn');
-            if (isSelected) {
-                card.classList.add('selected');
-                if (btn) btn.innerText = '✓';
-            } else {
-                card.classList.remove('selected');
-                if (btn && !isTaken && gameStatus === 'selection' && myBalance >= BET_AMOUNT && mySelectedCartelas.length < MAX_CARTELAS) {
-                    btn.innerText = 'Select';
-                    btn.disabled = false;
-                } else if (btn) {
-                    btn.innerText = isTaken ? 'Taken' : 'Select';
-                    btn.disabled = isTaken || gameStatus !== 'selection' || myBalance < BET_AMOUNT || mySelectedCartelas.length >= MAX_CARTELAS;
-                }
-            }
-        });
-        updateSelectedCountUI();
-    }
-
-    function renderCartelas() {
+    // ==================== IMMEDIATE CARTELA RENDERING ====================
+    // Render all 1000 cartelas RIGHT NOW (before any connection)
+    function renderCartelasImmediately() {
         cartelasContainer.innerHTML = '';
         for (let i = 1; i <= TOTAL_CARTELAS; i++) {
             const card = document.createElement('div');
@@ -593,16 +558,56 @@
             card.innerHTML = `
                 <div class="cartela-number">#${i}</div>
                 <div class="cartela-price">${BET_AMOUNT} ETB</div>
-                <button class="select-btn">Select</button>
+                <button class="select-btn" disabled>Connecting...</button>
             `;
-            const btn = card.querySelector('.select-btn');
-            btn.onclick = (e) => {
-                e.stopPropagation();
-                selectCartela(i);
-            };
             cartelasContainer.appendChild(card);
         }
+    }
+    
+    // Call this IMMEDIATELY - page shows cartelas instantly
+    renderCartelasImmediately();
+
+    // ==================== HELPER FUNCTIONS ====================
+    function hideLoading() { if (loadingOverlay) loadingOverlay.style.display = 'none'; }
+    function showLoading() { if (loadingOverlay) loadingOverlay.style.display = 'flex'; }
+
+    function updateBalanceUI() {
+        balanceEl.innerText = myBalance.toFixed(2) + ' ETB';
+        const canPlay = myBalance >= BET_AMOUNT;
+        watchOnlyMsg.style.display = canPlay ? 'none' : 'block';
+        
+        // Update button states based on balance
         updateSelectedUI();
+    }
+
+    function updateSelectedCountUI() {
+        selectedCountEl.innerText = `${mySelectedCartelas.length}/${MAX_CARTELAS}`;
+    }
+
+    function updateSelectedUI() {
+        const canAfford = myBalance >= BET_AMOUNT;
+        
+        document.querySelectorAll('.cartela-card').forEach(card => {
+            const num = parseInt(card.getAttribute('data-id'));
+            const isSelected = mySelectedCartelas.includes(num);
+            const isTaken = globalTakenCartelas.has(num);
+            const btn = card.querySelector('.select-btn');
+            
+            if (isSelected) {
+                card.classList.add('selected');
+                if (btn) btn.innerText = '✓';
+            } else {
+                card.classList.remove('selected');
+                if (btn && !isTaken && gameStatus === 'selection' && canAfford && mySelectedCartelas.length < MAX_CARTELAS) {
+                    btn.innerText = 'Select';
+                    btn.disabled = false;
+                } else if (btn) {
+                    btn.innerText = isTaken ? 'Taken' : (canAfford ? 'Select' : 'Insufficient');
+                    btn.disabled = isTaken || gameStatus !== 'selection' || !canAfford || mySelectedCartelas.length >= MAX_CARTELAS;
+                }
+            }
+        });
+        updateSelectedCountUI();
     }
 
     async function selectCartela(cartelaNumber) {
@@ -859,7 +864,6 @@
             userData = data.user;
             myBalance = userData.balance;
             updateBalanceUI();
-            renderCartelas();
             connectWebSocket(data.token);
         } catch (err) {
             showMessage('Authentication failed: ' + err.message, 5000);
