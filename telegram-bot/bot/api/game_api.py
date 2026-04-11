@@ -17,7 +17,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.database import database
+from bot.db.database import database
 from config import Config
 
 # Create blueprint
