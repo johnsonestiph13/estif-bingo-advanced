@@ -10,18 +10,29 @@ import hashlib
 import random
 import string
 import os
+import asyncio
 from functools import wraps
 
 # Import database and config
 import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot.db.database import database
-from config import Config
+from bot.config import Config
 
 # Create blueprint
 game_api_bp = Blueprint('game_api', __name__)
+
+# ==================== HELPER: Run async functions in Flask ====================
+
+def run_async(async_func, *args, **kwargs):
+    """Helper to run async functions in Flask's synchronous context"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(async_func(*args, **kwargs))
+    finally:
+        loop.close()
 
 # ==================== AUTHENTICATION DECORATOR ====================
 
@@ -39,7 +50,7 @@ def verify_api_key(f):
 
 @game_api_bp.route('/api/verify-code', methods=['POST'])
 @verify_api_key
-async def verify_code():
+def verify_code():
     """Verify one-time code and return user data"""
     data = request.get_json()
     code = data.get('code')
@@ -47,10 +58,10 @@ async def verify_code():
     if not code:
         return jsonify({'success': False, 'error': 'Code required'}), 400
     
-    telegram_id = await database.verify_auth_code(code)
+    telegram_id = run_async(database.verify_auth_code, code)
     
     if telegram_id:
-        user = await database.get_user(telegram_id)
+        user = run_async(database.get_user, telegram_id)
         if user:
             return jsonify({
                 'success': True,
@@ -63,7 +74,7 @@ async def verify_code():
 
 @game_api_bp.route('/api/exchange-code', methods=['POST'])
 @verify_api_key
-async def exchange_code():
+def exchange_code():
     """Exchange one-time code for JWT token (called by game server)"""
     data = request.get_json()
     code = data.get('code')
@@ -71,10 +82,10 @@ async def exchange_code():
     if not code:
         return jsonify({'success': False, 'error': 'Code required'}), 400
     
-    telegram_id = await database.verify_auth_code(code)
+    telegram_id = run_async(database.verify_auth_code, code)
     
     if telegram_id:
-        user = await database.get_user(telegram_id)
+        user = run_async(database.get_user, telegram_id)
         if user:
             # Generate JWT token for game server
             token = jwt.encode({
@@ -123,7 +134,7 @@ def verify_token():
 
 @game_api_bp.route('/api/deduct', methods=['POST'])
 @verify_api_key
-async def deduct_balance():
+def deduct_balance():
     """Deduct balance for cartela purchase"""
     data = request.get_json()
     telegram_id = data.get('telegram_id')
@@ -135,15 +146,10 @@ async def deduct_balance():
     if not telegram_id:
         return jsonify({'success': False, 'error': 'telegram_id required'}), 400
     
-    success = await database.update_balance(
-        telegram_id,
-        -amount,
-        'cartela_purchase',
-        round_num
-    )
+    success = run_async(database.update_balance, telegram_id, -amount, 'cartela_purchase', round_num)
     
     if success:
-        user = await database.get_user(telegram_id)
+        user = run_async(database.get_user, telegram_id)
         return jsonify({
             'success': True,
             'new_balance': float(user['balance'])
@@ -156,7 +162,7 @@ async def deduct_balance():
 
 @game_api_bp.route('/api/add', methods=['POST'])
 @verify_api_key
-async def add_balance():
+def add_balance():
     """Add winnings to user balance"""
     data = request.get_json()
     telegram_id = data.get('telegram_id')
@@ -167,15 +173,10 @@ async def add_balance():
     if not telegram_id or not amount:
         return jsonify({'success': False, 'error': 'telegram_id and amount required'}), 400
     
-    success = await database.update_balance(
-        telegram_id,
-        amount,
-        'winning',
-        round_id
-    )
+    success = run_async(database.update_balance, telegram_id, amount, 'winning', round_id)
     
     if success:
-        user = await database.get_user(telegram_id)
+        user = run_async(database.get_user, telegram_id)
         return jsonify({
             'success': True,
             'new_balance': float(user['balance'])
@@ -185,9 +186,9 @@ async def add_balance():
 
 @game_api_bp.route('/api/balance/<int:telegram_id>', methods=['GET'])
 @verify_api_key
-async def get_balance(telegram_id):
+def get_balance(telegram_id):
     """Get user balance"""
-    user = await database.get_user(telegram_id)
+    user = run_async(database.get_user, telegram_id)
     if user:
         return jsonify({
             'success': True,
@@ -198,7 +199,7 @@ async def get_balance(telegram_id):
 
 @game_api_bp.route('/api/balance', methods=['POST'])
 @verify_api_key
-async def get_balance_post():
+def get_balance_post():
     """Get user balance (POST method)"""
     data = request.get_json()
     telegram_id = data.get('telegram_id')
@@ -206,7 +207,7 @@ async def get_balance_post():
     if not telegram_id:
         return jsonify({'success': False, 'error': 'telegram_id required'}), 400
     
-    user = await database.get_user(telegram_id)
+    user = run_async(database.get_user, telegram_id)
     if user:
         return jsonify({
             'success': True,
@@ -217,7 +218,7 @@ async def get_balance_post():
 
 @game_api_bp.route('/api/adjust-balance', methods=['POST'])
 @verify_api_key
-async def adjust_balance():
+def adjust_balance():
     """Adjust user balance (admin action)"""
     data = request.get_json()
     telegram_id = data.get('telegram_id')
@@ -227,15 +228,10 @@ async def adjust_balance():
     if not telegram_id or amount is None:
         return jsonify({'success': False, 'error': 'telegram_id and amount required'}), 400
     
-    success = await database.update_balance(
-        telegram_id,
-        amount,
-        'admin_adjustment',
-        None
-    )
+    success = run_async(database.update_balance, telegram_id, amount, 'admin_adjustment', None)
     
     if success:
-        user = await database.get_user(telegram_id)
+        user = run_async(database.get_user, telegram_id)
         return jsonify({
             'success': True,
             'new_balance': float(user['balance']),
@@ -248,9 +244,9 @@ async def adjust_balance():
 
 @game_api_bp.route('/api/commission', methods=['GET'])
 @verify_api_key
-async def get_commission():
+def get_commission():
     """Get current win percentage"""
-    percentage = await database.get_win_percentage()
+    percentage = run_async(database.get_win_percentage)
     return jsonify({
         'success': True,
         'percentage': percentage
@@ -258,7 +254,7 @@ async def get_commission():
 
 @game_api_bp.route('/api/commission', methods=['POST'])
 @verify_api_key
-async def set_commission():
+def set_commission():
     """Set win percentage"""
     data = request.get_json()
     percentage = data.get('percentage')
@@ -266,7 +262,7 @@ async def set_commission():
     if percentage not in Config.WIN_PERCENTAGES:
         return jsonify({'success': False, 'error': f'Invalid percentage. Allowed: {Config.WIN_PERCENTAGES}'}), 400
     
-    await database.set_win_percentage(percentage)
+    run_async(database.set_win_percentage, percentage)
     
     return jsonify({
         'success': True,
@@ -278,9 +274,9 @@ async def set_commission():
 
 @game_api_bp.route('/api/get-user/<int:telegram_id>', methods=['GET'])
 @verify_api_key
-async def get_user(telegram_id):
+def get_user(telegram_id):
     """Get user details by Telegram ID"""
-    user = await database.get_user(telegram_id)
+    user = run_async(database.get_user, telegram_id)
     
     if user:
         # Convert to dict and handle Decimal
@@ -299,7 +295,7 @@ async def get_user(telegram_id):
 
 @game_api_bp.route('/api/get-user', methods=['POST'])
 @verify_api_key
-async def get_user_post():
+def get_user_post():
     """Get user details by Telegram ID (POST method)"""
     data = request.get_json()
     telegram_id = data.get('telegram_id')
@@ -307,7 +303,7 @@ async def get_user_post():
     if not telegram_id:
         return jsonify({'success': False, 'error': 'telegram_id required'}), 400
     
-    user = await database.get_user(telegram_id)
+    user = run_async(database.get_user, telegram_id)
     
     if user:
         user_dict = dict(user)
@@ -325,7 +321,7 @@ async def get_user_post():
 
 @game_api_bp.route('/api/search-players', methods=['POST'])
 @verify_api_key
-async def search_players():
+def search_players():
     """Search players by username or phone"""
     data = request.get_json()
     search_term = data.get('search', '')
@@ -333,7 +329,7 @@ async def search_players():
     if len(search_term) < 2:
         return jsonify({'success': False, 'error': 'Search term must be at least 2 characters'}), 400
     
-    players = await database.search_players(search_term)
+    players = run_async(database.search_players, search_term)
     
     # Convert Decimal to float for JSON serialization
     players_list = []
@@ -352,48 +348,54 @@ async def search_players():
 
 @game_api_bp.route('/api/player-stats/<int:telegram_id>', methods=['GET'])
 @verify_api_key
-async def get_player_stats(telegram_id):
+def get_player_stats(telegram_id):
     """Get player statistics"""
-    user = await database.get_user(telegram_id)
+    user = run_async(database.get_user, telegram_id)
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
-    # Get transaction stats
-    async with database.pool.acquire() as conn:
-        # Total bets
-        total_bets = await conn.fetchval("""
-            SELECT COALESCE(SUM(amount), 0) FROM game_transactions 
-            WHERE telegram_id = $1 AND type = 'bet'
-        """, telegram_id)
-        
-        # Total wins
-        total_wins = await conn.fetchval("""
-            SELECT COALESCE(SUM(amount), 0) FROM game_transactions 
-            WHERE telegram_id = $1 AND type = 'win'
-        """, telegram_id)
-        
-        # Games played
-        games_played = await conn.fetchval("""
-            SELECT COUNT(*) FROM game_transactions 
-            WHERE telegram_id = $1 AND type = 'bet'
-        """, telegram_id)
-        
-        # Games won
-        games_won = await conn.fetchval("""
-            SELECT COUNT(*) FROM game_transactions 
-            WHERE telegram_id = $1 AND type = 'win'
-        """, telegram_id)
+    # Get transaction stats using a direct async call
+    async def get_stats():
+        async with database.pool.acquire() as conn:
+            total_bets = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM game_transactions 
+                WHERE telegram_id = $1 AND type = 'bet'
+            """, telegram_id)
+            
+            total_wins = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM game_transactions 
+                WHERE telegram_id = $1 AND type = 'win'
+            """, telegram_id)
+            
+            games_played = await conn.fetchval("""
+                SELECT COUNT(*) FROM game_transactions 
+                WHERE telegram_id = $1 AND type = 'bet'
+            """, telegram_id)
+            
+            games_won = await conn.fetchval("""
+                SELECT COUNT(*) FROM game_transactions 
+                WHERE telegram_id = $1 AND type = 'win'
+            """, telegram_id)
+            
+            return {
+                'total_bets': float(total_bets) if total_bets else 0,
+                'total_wins': float(total_wins) if total_wins else 0,
+                'games_played': games_played or 0,
+                'games_won': games_won or 0
+            }
+    
+    stats = run_async(get_stats)
     
     return jsonify({
         'success': True,
         'stats': {
-            'total_bets': float(total_bets) if total_bets else 0,
-            'total_wins': float(total_wins) if total_wins else 0,
-            'games_played': games_played or 0,
-            'games_won': games_won or 0,
-            'net_result': float(total_wins or 0) - float(total_bets or 0),
-            'win_rate': round((games_won or 0) / (games_played or 1) * 100, 2)
+            'total_bets': stats['total_bets'],
+            'total_wins': stats['total_wins'],
+            'games_played': stats['games_played'],
+            'games_won': stats['games_won'],
+            'net_result': stats['total_wins'] - stats['total_bets'],
+            'win_rate': round((stats['games_won'] / (stats['games_played'] or 1)) * 100, 2)
         }
     })
 
@@ -401,7 +403,7 @@ async def get_player_stats(telegram_id):
 
 @game_api_bp.route('/api/save-round', methods=['POST'])
 @verify_api_key
-async def save_round():
+def save_round():
     """Save round result to database"""
     data = request.get_json()
     
@@ -410,12 +412,15 @@ async def save_round():
         if field not in data:
             return jsonify({'success': False, 'error': f'Missing field: {field}'}), 400
     
-    async with database.pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO game_rounds (round_number, total_pool, winner_reward, admin_commission, winners, win_percentage)
-            VALUES ($1, $2, $3, $4, $5, $6)
-        """, data['round_id'], data['pool_amount'], data['total_payout'], 
-            data['commission'], data['winners'], data['win_percentage'])
+    async def save():
+        async with database.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO game_rounds (round_number, total_pool, winner_reward, admin_commission, winners, win_percentage)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """, data['round_id'], data['pool_amount'], data['total_payout'], 
+                data['commission'], data['winners'], data['win_percentage'])
+    
+    run_async(save)
     
     return jsonify({'success': True})
 
@@ -424,8 +429,12 @@ async def save_round():
 @game_api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint for Render"""
+    # Test database connection
+    db_connected = run_async(database.health_check)
+    
     return jsonify({
-        'status': 'ok',
+        'status': 'alive',
+        'database': 'connected' if db_connected else 'disconnected',
         'timestamp': datetime.utcnow().isoformat(),
         'service': 'telegram-bot-api'
     })

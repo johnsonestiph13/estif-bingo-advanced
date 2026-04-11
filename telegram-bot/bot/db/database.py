@@ -1,32 +1,33 @@
-# db/database.py - COMPLETE FIXED VERSION WITH CORRECT IMPORTS
-
+# telegram-bot/bot/db/database.py
 import asyncpg
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
-from decimal import Decimal
 import random
 import string
 import os
 
-# ✅ FIXED: Use absolute import instead of relative
-from bot.config import (
-    DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE, 
-    DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
-)
+# ✅ Correct import for Render
+try:
+    from bot.config import (
+        DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE,
+        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
+    )
+except ImportError:
+    # Fallback for local development
+    from config import (
+        DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE,
+        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
+    )
 
 logger = logging.getLogger(__name__)
 
 
 class Database:
-    """Database manager with connection pool and CRUD operations"""
-    
     _pool: asyncpg.Pool = None
 
     @classmethod
     async def init_pool(cls):
-        """Initialize database connection pool with SSL support for Render"""
-        # Ensure SSL is enabled for production (Render requires SSL)
         ssl_config = "require" if os.getenv("NODE_ENV") == "production" else None
         
         cls._pool = await asyncpg.create_pool(
@@ -44,7 +45,6 @@ class Database:
 
     @classmethod
     async def _ensure_columns(cls):
-        """Forcefully ensure all required columns exist"""
         async with cls._pool.acquire() as conn:
             columns = await conn.fetch("""
                 SELECT column_name 
@@ -72,14 +72,12 @@ class Database:
 
     @classmethod
     async def close_pool(cls):
-        """Close database connection pool"""
         if cls._pool:
             await cls._pool.close()
             logger.info("Database pool closed")
 
     @classmethod
     async def _init_tables(cls):
-        """Create all necessary tables in correct order"""
         async with cls._pool.acquire() as conn:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -138,38 +136,6 @@ class Database:
             """)
             
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pending_withdrawals (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    amount DECIMAL(12,2),
-                    account TEXT,
-                    method TEXT,
-                    status TEXT DEFAULT 'pending',
-                    requested_at TIMESTAMP DEFAULT NOW(),
-                    processed_at TIMESTAMP
-                )
-            """)
-            
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS otp_codes (
-                    telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    otp TEXT,
-                    expires_at TIMESTAMP,
-                    attempts INTEGER DEFAULT 0
-                )
-            """)
-            
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS auth_codes (
-                    code TEXT PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    expires_at TIMESTAMP,
-                    used BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            await conn.execute("""
                 INSERT INTO game_settings (key, value, description) VALUES 
                     ('win_percentage', '80', 'Current game win percentage (70,75,76,80)'),
                     ('selection_time', '50', 'Cartela selection time in seconds'),
@@ -195,7 +161,6 @@ class Database:
 
     @classmethod
     async def _run_migrations(cls):
-        """Run pending migrations automatically"""
         async with cls._pool.acquire() as conn:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS migrations (

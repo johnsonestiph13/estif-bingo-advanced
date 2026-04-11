@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from .config import BOT_TOKEN, FLASK_PORT, LOG_LEVEL, LOG_FORMAT
-from .db.database import Database
+from bot.config import BOT_TOKEN, FLASK_PORT, LOG_LEVEL, LOG_FORMAT
+from bot.db.database import Database
 
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(__name__)
@@ -17,38 +17,43 @@ logger = logging.getLogger(__name__)
 
 def run_flask():
     """Run Flask in a separate thread"""
-    from .api import create_flask_app
-    app = create_flask_app()
+    from flask import Flask
+    from flask_cors import CORS
+    
+    # Create Flask app
+    app = Flask(__name__)
+    CORS(app)
     
     # Register game API blueprint
-    from .api.game_api import game_api_bp
+    from bot.api.game_api import game_api_bp
     app.register_blueprint(game_api_bp)
     logger.info("✅ Game API blueprint registered")
     
+    # Run the Flask app
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
 
 def run_bot():
-    """Run Telegram bot in a separate thread"""
+    """Run Telegram bot in the main thread"""
     from telegram.ext import (
         Application, CommandHandler, MessageHandler,
         filters, CallbackQueryHandler
     )
-    from .handlers.start import start, language_callback
-    from .handlers.register import register, handle_contact
-    from .handlers.deposit import deposit, deposit_callback, handle_deposit_amount, handle_deposit_screenshot
-    from .handlers.cashout import cashout, cashout_callback, handle_cashout_amount, handle_cashout_account
-    from .handlers.balance import balance
-    from .handlers.invite import invite
-    from .handlers.contact import contact_center
-    from .handlers.bingo_otp import bingo_otp
-    from .handlers.admin_commands import (
+    from bot.handlers.start import start, language_callback
+    from bot.handlers.register import register, handle_contact
+    from bot.handlers.deposit import deposit, deposit_callback, handle_deposit_amount, handle_deposit_screenshot
+    from bot.handlers.cashout import cashout, cashout_callback, handle_cashout_amount, handle_cashout_account
+    from bot.handlers.balance import balance
+    from bot.handlers.invite import invite
+    from bot.handlers.contact import contact_center
+    from bot.handlers.bingo_otp import bingo_otp
+    from bot.handlers.admin_commands import (
         approve_deposit, reject_deposit,
         approve_cashout, reject_cashout
     )
     
     async def play(update, context):
-        from .handlers.register import play as play_handler
+        from bot.handlers.register import play as play_handler
         await play_handler(update, context)
     
     async def handle_all_text(update, context):
@@ -58,8 +63,8 @@ def run_bot():
             return
         if await handle_cashout_account(update, context):
             return
-        from .texts.locales import TEXTS
-        from .keyboards.menu import menu
+        from bot.texts.locales import TEXTS
+        from bot.keyboards.menu import menu
         user = await Database.get_user(update.effective_user.id)
         lang = user.get('lang', 'en') if user else 'en'
         await update.message.reply_text(TEXTS[lang]['use_menu'], reply_markup=menu(lang))

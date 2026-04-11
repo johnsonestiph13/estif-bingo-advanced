@@ -1,4 +1,4 @@
-# config.py - COMPLETE FIXED VERSION
+# config.py - COMPLETE FIXED VERSION WITH GAME API SUPPORT
 
 import os
 import sys
@@ -32,10 +32,16 @@ if not API_SECRET:
 # ==================== OPTIONAL ENVIRONMENT VARIABLES ====================
 
 # Server Configuration
-FLASK_PORT = int(os.environ.get("FLASK_PORT", "8080"))
+FLASK_PORT = int(os.environ.get("FLASK_PORT", "10000"))
 
 # Game URLs
-GAME_WEB_URL = os.environ.get("GAME_WEB_URL", "https://estif-bingo-247.onrender.com/player.html")
+GAME_WEB_URL = os.environ.get("GAME_WEB_URL", "https://estif-bingo-advanced-1.onrender.com/player.html")
+
+# Game Constants (for API)
+CARTELA_PRICE = int(os.environ.get("CARTELA_PRICE", "10"))
+MIN_BALANCE_FOR_PLAY = int(os.environ.get("MIN_BALANCE_FOR_PLAY", "10"))
+WIN_PERCENTAGES = [70, 75, 76, 80]
+DEFAULT_WIN_PERCENTAGE = int(os.environ.get("DEFAULT_WIN_PERCENTAGE", "80"))
 
 # Support Links
 SUPPORT_GROUP_LINK = os.environ.get("SUPPORT_GROUP_LINK", "https://t.me/presectionA")
@@ -55,8 +61,8 @@ OTP_EXPIRY_MINUTES = int(os.environ.get("OTP_EXPIRY_MINUTES", "5"))
 OTP_LENGTH = int(os.environ.get("OTP_LENGTH", "6"))
 
 # Database Configuration
-DB_MIN_SIZE = int(os.environ.get("DB_MIN_SIZE", "5"))
-DB_MAX_SIZE = int(os.environ.get("DB_MAX_SIZE", "20"))
+DB_MIN_SIZE = int(os.environ.get("DB_MIN_SIZE", "2"))
+DB_MAX_SIZE = int(os.environ.get("DB_MAX_SIZE", "10"))
 DB_COMMAND_TIMEOUT = int(os.environ.get("DB_COMMAND_TIMEOUT", "60"))
 
 # Migration Control
@@ -75,8 +81,58 @@ RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "300"))
 # ==================== DERIVED CONFIGURATIONS ====================
 
 PAYMENT_METHODS = list(PAYMENT_ACCOUNTS.keys())
-ALLOWED_WIN_PERCENTAGES = [70, 75, 76, 80]
-DEFAULT_WIN_PERCENTAGE = 75
+ALLOWED_WIN_PERCENTAGES = WIN_PERCENTAGES
+
+# ==================== CONFIG CLASS FOR EASY ACCESS ====================
+
+class Config:
+    """Config class for easy access to settings"""
+    # Required
+    BOT_TOKEN = BOT_TOKEN
+    ADMIN_CHAT_ID = ADMIN_CHAT_ID
+    DATABASE_URL = DATABASE_URL
+    JWT_SECRET = JWT_SECRET
+    API_SECRET = API_SECRET
+    
+    # Server
+    FLASK_PORT = FLASK_PORT
+    GAME_WEB_URL = GAME_WEB_URL
+    
+    # Game
+    CARTELA_PRICE = CARTELA_PRICE
+    MIN_BALANCE_FOR_PLAY = MIN_BALANCE_FOR_PLAY
+    WIN_PERCENTAGES = WIN_PERCENTAGES
+    DEFAULT_WIN_PERCENTAGE = DEFAULT_WIN_PERCENTAGE
+    
+    # Support
+    SUPPORT_CHANNEL_LINK = SUPPORT_CHANNEL_LINK
+    SUPPORT_GROUP_LINK = SUPPORT_GROUP_LINK
+    
+    # Payment
+    PAYMENT_ACCOUNTS = PAYMENT_ACCOUNTS
+    ACCOUNT_HOLDER = ACCOUNT_HOLDER
+    
+    # OTP
+    OTP_EXPIRY_MINUTES = OTP_EXPIRY_MINUTES
+    OTP_LENGTH = OTP_LENGTH
+    
+    # Database
+    DB_MIN_SIZE = DB_MIN_SIZE
+    DB_MAX_SIZE = DB_MAX_SIZE
+    DB_COMMAND_TIMEOUT = DB_COMMAND_TIMEOUT
+    
+    # Migrations
+    SKIP_AUTO_MIGRATIONS = SKIP_AUTO_MIGRATIONS
+    
+    # Logging
+    LOG_LEVEL = LOG_LEVEL
+    LOG_FORMAT = LOG_FORMAT
+    
+    # Rate Limiting
+    MAX_OTP_REQUESTS = MAX_OTP_REQUESTS
+    MAX_DEPOSIT_REQUESTS = MAX_DEPOSIT_REQUESTS
+    MAX_CASHOUT_REQUESTS = MAX_CASHOUT_REQUESTS
+    RATE_LIMIT_WINDOW = RATE_LIMIT_WINDOW
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -118,6 +174,10 @@ def get_env_info() -> dict:
         "api_secret_set": bool(API_SECRET),
         "flask_port": FLASK_PORT,
         "game_web_url": GAME_WEB_URL,
+        "cartela_price": CARTELA_PRICE,
+        "min_balance_for_play": MIN_BALANCE_FOR_PLAY,
+        "win_percentages": WIN_PERCENTAGES,
+        "default_win_percentage": DEFAULT_WIN_PERCENTAGE,
         "payment_methods": PAYMENT_METHODS,
         "skip_auto_migrations": SKIP_AUTO_MIGRATIONS,
         "log_level": LOG_LEVEL,
