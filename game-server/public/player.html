@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Estif Bingo 24/7 – Smart Bingo</title>
+    <title>Estif Bingo 24/7 – Live Bingo</title>
     <style>
         /* ==================== YOUR EXISTING CSS - NO CHANGES ==================== */
         * {
@@ -422,7 +422,7 @@
 </head>
 <body>
 
-<!-- Loading Overlay -->
+<!-- Loading Overlay (hidden immediately after page loads) -->
 <div id="loadingOverlay">
     <div class="loader"></div>
     <p style="color: white; margin-top: 15px;">Loading Game...</p>
@@ -465,7 +465,7 @@
     <div class="stat-card"><div class="stat-label">👥 ONLINE</div><div id="playersCount" class="stat-value">0</div></div>
 </div>
 
-<!-- Cartelas Grid (1-1000) - Rendered IMMEDIATELY -->
+<!-- Cartelas Grid (1-1000) - Rendered IMMEDIATELY on page load -->
 <div class="cartelas-section">
     <div class="cartelas-title">🎯 Select Your Cartelas</div>
     <div class="cartelas-sub">Cartela IDs: #1 - #1000 (each 10 ETB)</div>
@@ -500,25 +500,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-    // ==================== GLOBAL STATE ====================
-    let socket = null;
-    let userData = null;
-    let myBalance = 0;
-    let mySelectedCartelas = [];
-    let gameStatus = 'selection';
-    let currentRound = 1;
-    let drawnNumbers = [];
-    let winPercentage = 80;
-    let globalTakenCartelas = new Set();
-    let playersList = [];
-    let onlineCount = 0;
-    let reconnectAttempts = 0;
-    let heartbeatInterval = null;
-
-    const BET_AMOUNT = 10;
-    const MAX_CARTELAS = 4;
-    const TOTAL_CARTELAS = 1000;
-
+    // ==================== IMMEDIATE UI (Runs BEFORE any connection) ====================
+    
     // DOM Elements
     const balanceEl = document.getElementById('balance');
     const selectedCountEl = document.getElementById('selectedCount');
@@ -537,7 +520,29 @@
     const loadingOverlay = document.getElementById('loadingOverlay');
     const connectionStatusEl = document.getElementById('connectionStatus');
 
-    // ==================== IMMEDIATE CARTELA RENDERING ====================
+    // Game State
+    let myBalance = 0;
+    let mySelectedCartelas = [];
+    let gameStatus = 'selection';
+    let currentRound = 1;
+    let drawnNumbers = [];
+    let winPercentage = 80;
+    let globalTakenCartelas = new Set();
+    let playersList = [];
+    let onlineCount = 0;
+    let countdownInterval = null;
+    let socket = null;
+    let userData = null;
+    
+    // Constants
+    const BET_AMOUNT = 10;
+    const MAX_CARTELAS = 4;
+    const TOTAL_CARTELAS = 1000;
+    const SELECTION_TIME = 50;
+    
+    // ==================== IMMEDIATE FUNCTIONS (Run NOW, no waiting) ====================
+    
+    // Render all 1000 cartelas immediately
     function renderCartelasImmediately() {
         cartelasContainer.innerHTML = '';
         for (let i = 1; i <= TOTAL_CARTELAS; i++) {
@@ -553,28 +558,102 @@
         }
     }
     
-    renderCartelasImmediately();
-
-    // ==================== HELPER FUNCTIONS ====================
+    // Start 50-second countdown immediately
+    function startCountdownImmediately() {
+        let seconds = SELECTION_TIME;
+        timerEl.textContent = seconds;
+        
+        if (countdownInterval) clearInterval(countdownInterval);
+        
+        countdownInterval = setInterval(() => {
+            if (gameStatus !== 'selection') return;
+            
+            seconds--;
+            timerEl.textContent = seconds;
+            
+            // Blink for last 10 seconds
+            if (seconds <= 10 && seconds > 0) {
+                timerEl.classList.add('blinking');
+                // Play beep at 10,5,3,2,1
+                if ([10,5,3,2,1].includes(seconds)) {
+                    playBeep();
+                }
+            } else {
+                timerEl.classList.remove('blinking');
+            }
+            
+            if (seconds <= 0) {
+                clearInterval(countdownInterval);
+                timerEl.textContent = "0";
+                timerEl.classList.remove('blinking');
+            }
+        }, 1000);
+    }
+    
+    function playBeep() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                const ctx = new AudioContext();
+                const oscillator = ctx.createOscillator();
+                const gain = ctx.createGain();
+                oscillator.connect(gain);
+                gain.connect(ctx.destination);
+                oscillator.frequency.value = 880;
+                gain.gain.value = 0.08;
+                oscillator.start();
+                gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
+                oscillator.stop(ctx.currentTime + 0.1);
+            }
+        } catch(e) { console.log('Beep error:', e); }
+    }
+    
+    function playWinSound() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                const ctx = new AudioContext();
+                const oscillator = ctx.createOscillator();
+                const gain = ctx.createGain();
+                oscillator.connect(gain);
+                gain.connect(ctx.destination);
+                oscillator.frequency.value = 440;
+                gain.gain.value = 0.15;
+                oscillator.start();
+                gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.3);
+                oscillator.stop(ctx.currentTime + 0.3);
+                setTimeout(() => {
+                    const osc2 = ctx.createOscillator();
+                    const gain2 = ctx.createGain();
+                    osc2.connect(gain2);
+                    gain2.connect(ctx.destination);
+                    osc2.frequency.value = 880;
+                    gain2.gain.value = 0.1;
+                    osc2.start();
+                    gain2.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.3);
+                    osc2.stop(ctx.currentTime + 0.3);
+                }, 250);
+            }
+        } catch(e) { console.log('Win sound error:', e); }
+    }
+    
+    // Hide loading overlay immediately after page renders
     function hideLoading() { 
         if (loadingOverlay) loadingOverlay.style.display = 'none'; 
     }
     
-    function showLoading() { 
-        if (loadingOverlay) loadingOverlay.style.display = 'flex'; 
-    }
-
+    // Update balance display
     function updateBalanceUI() {
         balanceEl.innerText = myBalance.toFixed(2) + ' ETB';
         const canPlay = myBalance >= BET_AMOUNT;
         watchOnlyMsg.style.display = canPlay ? 'none' : 'block';
         updateSelectedUI();
     }
-
+    
     function updateSelectedCountUI() {
         selectedCountEl.innerText = `${mySelectedCartelas.length}/${MAX_CARTELAS}`;
     }
-
+    
     function updateSelectedUI() {
         const canAfford = myBalance >= BET_AMOUNT;
         
@@ -601,53 +680,7 @@
         });
         updateSelectedCountUI();
     }
-
-    async function selectCartela(cartelaNumber) {
-        if (gameStatus !== 'selection') {
-            showMessage('Cannot select now. Wait for next round.', 2000);
-            return;
-        }
-        if (mySelectedCartelas.includes(cartelaNumber)) {
-            showMessage('Already selected', 1500);
-            return;
-        }
-        if (mySelectedCartelas.length >= MAX_CARTELAS) {
-            showMessage(`Maximum ${MAX_CARTELAS} cartelas per round`, 2000);
-            return;
-        }
-        if (myBalance < BET_AMOUNT) {
-            showMessage('Insufficient balance', 2000);
-            return;
-        }
-        if (globalTakenCartelas.has(cartelaNumber)) {
-            showMessage('Cartela already taken', 2000);
-            return;
-        }
-        
-        // Disable button temporarily to prevent double-click
-        const btn = document.querySelector(`.cartela-card[data-id="${cartelaNumber}"] .select-btn`);
-        if (btn) {
-            btn.disabled = true;
-            btn.innerText = '...';
-        }
-        
-        socket.emit('selectCartela', { cartelaId: cartelaNumber, price: BET_AMOUNT }, (response) => {
-            if (response && response.success) {
-                mySelectedCartelas.push(cartelaNumber);
-                myBalance = response.newBalance;
-                updateBalanceUI();
-                updateSelectedUI();
-                playSound('select');
-            } else if (response && response.error) {
-                showMessage(response.error, 2500);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerText = 'Select';
-                }
-            }
-        });
-    }
-
+    
     function updateDrawnNumbersUI() {
         drawnNumbersList.innerHTML = '';
         drawnNumbers.slice(-20).forEach(num => {
@@ -657,7 +690,7 @@
             drawnNumbersList.appendChild(ball);
         });
     }
-
+    
     function updatePlayersUI() {
         playersListEl.innerHTML = '';
         playersList.slice(0, 20).forEach(p => {
@@ -668,7 +701,7 @@
         });
         playersCountEl.innerText = onlineCount;
     }
-
+    
     function showMessage(msg, duration = 3000) {
         const div = document.createElement('div');
         div.style.position = 'fixed';
@@ -686,34 +719,8 @@
         document.body.appendChild(div);
         setTimeout(() => div.remove(), duration);
     }
-
-    function playSound(name) {
-        const soundEnabled = localStorage.getItem('soundEnabled') !== 'false';
-        if (!soundEnabled) return;
-        
-        if (name === 'select') {
-            try {
-                const audio = new Audio();
-                audio.volume = 0.3;
-                // Simple beep for selection feedback
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                if (AudioContext) {
-                    const ctx = new AudioContext();
-                    const oscillator = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    oscillator.connect(gain);
-                    gain.connect(ctx.destination);
-                    oscillator.frequency.value = 880;
-                    gain.gain.value = 0.1;
-                    oscillator.start();
-                    gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
-                    oscillator.stop(ctx.currentTime + 0.1);
-                }
-            } catch(e) { console.log('Sound error:', e); }
-        }
-    }
-
-    // ==================== WINNER MODAL ====================
+    
+    // Show winner modal
     function showWinnerModal(winnerName, cartelaId, amount, grid) {
         const modal = document.createElement('div');
         modal.className = 'winner-modal';
@@ -745,6 +752,7 @@
             </div>
         `;
         document.body.appendChild(modal);
+        playWinSound();
         
         let countdown = 6;
         const timer = setInterval(() => {
@@ -756,62 +764,68 @@
                 modal.remove();
             }
         }, 1000);
-        
-        // Play win sound
-        try {
-            const audio = new Audio();
-            audio.volume = 0.5;
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-                const ctx = new AudioContext();
-                const oscillator = ctx.createOscillator();
-                const gain = ctx.createGain();
-                oscillator.connect(gain);
-                gain.connect(ctx.destination);
-                oscillator.frequency.value = 440;
-                gain.gain.value = 0.2;
-                oscillator.start();
-                gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.5);
-                oscillator.stop(ctx.currentTime + 0.5);
-                setTimeout(() => {
-                    const osc2 = ctx.createOscillator();
-                    const gain2 = ctx.createGain();
-                    osc2.connect(gain2);
-                    gain2.connect(ctx.destination);
-                    osc2.frequency.value = 880;
-                    gain2.gain.value = 0.15;
-                    osc2.start();
-                    gain2.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.5);
-                    osc2.stop(ctx.currentTime + 0.5);
-                }, 300);
-            }
-        } catch(e) { console.log('Sound error:', e); }
     }
-
+    
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
     }
-
-    // ==================== SOCKET EVENTS ====================
-    function connectWebSocket(token) {
-        if (socket) {
-            socket.disconnect();
+    
+    // Select cartela
+    async function selectCartela(cartelaNumber) {
+        if (gameStatus !== 'selection') {
+            showMessage('Cannot select now. Wait for next round.', 2000);
+            return;
+        }
+        if (mySelectedCartelas.includes(cartelaNumber)) {
+            showMessage('Already selected', 1500);
+            return;
+        }
+        if (mySelectedCartelas.length >= MAX_CARTELAS) {
+            showMessage(`Maximum ${MAX_CARTELAS} cartelas per round`, 2000);
+            return;
+        }
+        if (myBalance < BET_AMOUNT) {
+            showMessage('Insufficient balance', 2000);
+            return;
+        }
+        if (globalTakenCartelas.has(cartelaNumber)) {
+            showMessage('Cartela already taken', 2000);
+            return;
         }
         
-        socket = io(window.location.origin, { 
-            transports: ['websocket'],
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            timeout: 20000
+        // Disable button temporarily
+        const btn = document.querySelector(`.cartela-card[data-id="${cartelaNumber}"] .select-btn`);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = '...';
+        }
+        
+        socket.emit('selectCartela', { cartelaId: cartelaNumber, price: BET_AMOUNT }, (response) => {
+            if (response && response.success) {
+                mySelectedCartelas.push(cartelaNumber);
+                myBalance = response.newBalance;
+                updateBalanceUI();
+                updateSelectedUI();
+            } else if (response && response.error) {
+                showMessage(response.error, 2500);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = 'Select';
+                }
+            }
         });
+    }
+    
+    // ==================== SOCKET CONNECTION ====================
+    
+    function connectWebSocket(token) {
+        socket = io(window.location.origin, { transports: ['websocket'] });
         
         socket.on('connect', () => {
             console.log('WebSocket connected');
-            reconnectAttempts = 0;
-            connectionStatusEl.className = 'connection-status connecting';
             socket.emit('authenticate', { token });
+            connectionStatusEl.className = 'connection-status connecting';
         });
         
         socket.on('authenticated', (data) => {
@@ -823,14 +837,6 @@
             statusMsgEl.innerText = '✅ Connected';
             connectionStatusEl.className = 'connection-status connected';
             hideLoading();
-            
-            // Start heartbeat
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            heartbeatInterval = setInterval(() => {
-                if (socket && socket.connected) {
-                    socket.emit('ping');
-                }
-            }, 30000);
         });
         
         socket.on('gameState', (state) => {
@@ -847,30 +853,7 @@
         });
         
         socket.on('timerUpdate', (data) => {
-            timerEl.innerText = data.seconds;
-            if (data.phase === 'selection' && data.seconds <= 10) {
-                timerEl.classList.add('blinking');
-                // Play countdown tick at 10,5,3,2,1
-                if ([10,5,3,2,1].includes(data.seconds)) {
-                    try {
-                        const AudioContext = window.AudioContext || window.webkitAudioContext;
-                        if (AudioContext) {
-                            const ctx = new AudioContext();
-                            const oscillator = ctx.createOscillator();
-                            const gain = ctx.createGain();
-                            oscillator.connect(gain);
-                            gain.connect(ctx.destination);
-                            oscillator.frequency.value = 880;
-                            gain.gain.value = 0.08;
-                            oscillator.start();
-                            gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
-                            oscillator.stop(ctx.currentTime + 0.1);
-                        }
-                    } catch(e) {}
-                }
-            } else {
-                timerEl.classList.remove('blinking');
-            }
+            // Server timer sync if needed
         });
         
         socket.on('balanceUpdated', (data) => {
@@ -902,12 +885,19 @@
             
             // Animate current number
             const currentNumberDiv = document.querySelector('.current-number');
-            if (currentNumberDiv) {
-                currentNumberDiv.innerHTML = `<div class="number-ball" style="animation: popIn 0.3s ease-out;">${data.number}</div>`;
+            if (!currentNumberDiv && document.querySelector('.stats-bar')) {
+                const newDiv = document.createElement('div');
+                newDiv.className = 'current-number';
+                newDiv.style.textAlign = 'center';
+                newDiv.style.margin = '15px 0';
+                document.querySelector('.stats-bar').insertAdjacentElement('afterend', newDiv);
+            }
+            const displayDiv = document.querySelector('.current-number');
+            if (displayDiv) {
+                const letter = getBingoLetter(data.number);
+                displayDiv.innerHTML = `<div class="number-ball" style="animation: popIn 0.3s ease-out; width: 60px; height: 60px; margin: 0 auto; font-size: 24px;">${letter}${data.number}</div>`;
                 setTimeout(() => {
-                    if (currentNumberDiv.firstChild) {
-                        currentNumberDiv.firstChild.style.animation = '';
-                    }
+                    if (displayDiv.firstChild) displayDiv.firstChild.style.animation = '';
                 }, 300);
             }
         });
@@ -962,38 +952,37 @@
             connectionStatusEl.className = 'connection-status disconnected';
             statusMsgEl.innerText = '⚠️ Connection error, retrying...';
         });
-        
-        socket.on('reconnect_attempt', (attempt) => {
-            reconnectAttempts = attempt;
-            statusMsgEl.innerText = `🔄 Reconnecting (attempt ${attempt})...`;
-        });
-        
-        socket.on('reconnect', () => {
-            statusMsgEl.innerText = '✅ Reconnected!';
-            setTimeout(() => {
-                if (gameStatus === 'selection') {
-                    statusMsgEl.innerText = '🎯 SELECTION PHASE - Choose your cartelas!';
-                }
-            }, 2000);
-        });
     }
-
+    
+    function getBingoLetter(number) {
+        if (number <= 15) return 'B';
+        if (number <= 30) return 'I';
+        if (number <= 45) return 'N';
+        if (number <= 60) return 'G';
+        return 'O';
+    }
+    
     // ==================== INITIALIZATION ====================
+    
     async function init() {
-        showLoading();
+        // Start UI immediately (no waiting)
+        renderCartelasImmediately();
+        startCountdownImmediately();
+        hideLoading();
+        
+        // Get auth code from URL
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         
         if (!code) {
             showMessage('No authentication code. Use Telegram bot to play.', 5000);
             statusMsgEl.innerText = '⚠️ No auth code';
-            hideLoading();
             return;
         }
         
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
             
             const resp = await fetch('/api/exchange-code', {
                 method: 'POST',
@@ -1018,11 +1007,13 @@
             console.error('Auth error:', err);
             statusMsgEl.innerText = '⚠️ Authentication failed';
             showMessage('Failed to connect. Please try again.', 5000);
-            hideLoading();
         }
     }
-
-    // ==================== SOUND CONTROLS ====================
+    
+    // Attach selectCartela to window for inline onclick
+    window.selectCartela = selectCartela;
+    
+    // Sound controls
     soundToggleBtn.addEventListener('click', () => {
         const isOn = localStorage.getItem('soundEnabled') !== 'false';
         localStorage.setItem('soundEnabled', !isOn);
@@ -1037,19 +1028,7 @@
     soundToggleBtn.innerText = savedSound ? '🔊 Sound On' : '🔇 Sound Off';
     const savedPack = localStorage.getItem('soundPack') || 'pack1';
     soundPackSelect.value = savedPack;
-
-    // Add current number display element if not exists
-    const currentNumberContainer = document.querySelector('.current-number-container');
-    if (!currentNumberContainer) {
-        const statsBar = document.querySelector('.stats-bar');
-        const newDiv = document.createElement('div');
-        newDiv.className = 'current-number-container';
-        newDiv.style.textAlign = 'center';
-        newDiv.style.margin = '15px 0';
-        newDiv.innerHTML = '<div class="current-number"></div>';
-        if (statsBar) statsBar.insertAdjacentElement('afterend', newDiv);
-    }
-
+    
     // Start the game
     init();
 </script>
