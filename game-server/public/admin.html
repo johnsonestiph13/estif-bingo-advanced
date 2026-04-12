@@ -176,6 +176,11 @@
             background: #f59e0b;
             color: #0f172a;
         }
+        .admin-btn-info {
+            background: #3b82f6;
+            color: white;
+            border: none;
+        }
 
         /* Tables */
         .table-wrapper {
@@ -371,17 +376,28 @@
             <div id="searchResultsContainer" class="players-grid"></div>
         </div>
 
-        <!-- SOUND SETTINGS -->
+        <!-- SOUND SETTINGS - ENHANCED -->
         <div id="sounds" class="tab-content">
             <div class="control-group">
-                <label>🎵 Default Sound Pack:</label>
+                <label>🎵 Default Sound Pack (for new players):</label>
                 <select id="soundPackSelect">
-                    <option value="pack1">Classic</option>
-                    <option value="pack2">Electronic</option>
-                    <option value="pack3">Casino</option>
-                    <option value="pack4">Retro</option>
+                    <option value="pack1">🎵 Classic Pack</option>
+                    <option value="pack2">🎧 Electronic Pack</option>
+                    <option value="pack3">🎰 Casino Pack</option>
+                    <option value="pack4">📻 Retro Pack</option>
                 </select>
-                <button id="applySoundPackBtn" class="admin-btn admin-btn-primary">Apply to Player Page</button>
+                <button id="applyDefaultSoundPackBtn" class="admin-btn admin-btn-primary">✅ Set as Default for New Players</button>
+                <button id="forceAllPlayersSoundBtn" class="admin-btn admin-btn-info">🔄 Force Change for ALL Players</button>
+                <button id="previewSoundBtn" class="admin-btn">🔊 Preview Sound</button>
+            </div>
+            <div class="control-group">
+                <div style="font-size: 12px; color: #7e8a9b;">
+                    ℹ️ <strong>How Sound Settings Work:</strong><br>
+                    • <strong>Set as Default for New Players:</strong> New players will automatically get this sound pack.<br>
+                    • <strong>Force Change for ALL Players:</strong> All currently connected players will be switched to this sound pack.<br>
+                    • Players can always change their own sound pack in the game settings (bottom-right corner).<br>
+                    • Your personal sound pack preference is saved in your browser.
+                </div>
             </div>
         </div>
     </div>
@@ -390,7 +406,7 @@
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-    // ---------- Admin logic (preserving all original features, updated UI) ----------
+    // ---------- Admin logic with Enhanced Sound Management ----------
     let adminToken = localStorage.getItem('adminToken');
     let refreshInterval = null;
     const API_BASE = '';
@@ -597,8 +613,52 @@
     async function forceEnd() { try { const res = await apiCall('/api/admin/end-game', 'POST'); showToast('Round ended'); refreshGameStats(); } catch(e){ showToast('Failed',true); } }
     async function resetGame() { if(confirm('Reset to round 1?')) try{ await apiCall('/api/admin/reset-game', 'POST'); showToast('Game reset'); refreshGameStats(); } catch(e){ showToast('Failed',true); } }
 
-    // Sound settings
-    function applySoundPack() { localStorage.setItem('soundPack', document.getElementById('soundPackSelect').value); showToast('Sound pack applied for players'); }
+    // ==================== ENHANCED SOUND SETTINGS ====================
+    
+    // Set default sound pack for new players (stores in database)
+    async function setDefaultSoundPack() {
+        const soundPack = document.getElementById('soundPackSelect').value;
+        try {
+            const res = await apiCall('/api/admin/default-sound-pack', 'POST', { soundPack });
+            if (res.success) {
+                showToast(`✅ Default sound pack set to ${soundPack}. New players will hear this.`);
+            } else {
+                showToast(res.message || 'Failed to set default sound pack', true);
+            }
+        } catch(e) {
+            showToast('Error setting default sound pack', true);
+        }
+    }
+    
+    // Force sound pack for ALL currently connected players
+    async function forceAllPlayersSoundPack() {
+        const soundPack = document.getElementById('soundPackSelect').value;
+        if (confirm(`⚠️ Force ALL currently connected players to use "${soundPack}" sound pack?\n\nThis will override their personal settings for this session. Players can still change it back in their game settings.`)) {
+            try {
+                const res = await apiCall('/api/admin/force-sound-pack', 'POST', { soundPack });
+                if (res.success) {
+                    showToast(`🔊 All players forced to use ${soundPack} sound pack.`);
+                } else {
+                    showToast(res.message || 'Failed to force sound pack', true);
+                }
+            } catch(e) {
+                showToast('Error forcing sound pack', true);
+            }
+        }
+    }
+    
+    // Preview sound (plays in admin's browser)
+    function previewSound() {
+        const soundPack = document.getElementById('soundPackSelect').value;
+        try {
+            const audio = new Audio(`/sounds/${soundPack}/win.mp3`);
+            audio.volume = 0.5;
+            audio.play().catch(e => console.log('Preview error:', e));
+            showToast(`🔊 Previewing ${soundPack} sound pack (win sound)`);
+        } catch(e) {
+            showToast('Could not preview sound', true);
+        }
+    }
 
     // Login / Logout
     async function login() {
@@ -648,7 +708,12 @@
     document.getElementById('fetchReportBtn').addEventListener('click', fetchReport);
     document.getElementById('exportReportBtn').addEventListener('click', exportReport);
     document.getElementById('searchPlayerBtn').addEventListener('click', searchPlayers);
-    document.getElementById('applySoundPackBtn').addEventListener('click', applySoundPack);
+    
+    // Enhanced sound event listeners
+    document.getElementById('applyDefaultSoundPackBtn').addEventListener('click', setDefaultSoundPack);
+    document.getElementById('forceAllPlayersSoundBtn').addEventListener('click', forceAllPlayersSoundPack);
+    document.getElementById('previewSoundBtn').addEventListener('click', previewSound);
+    
     document.getElementById('reportType').addEventListener('change', updateDateInputs);
     updateDateInputs();
     initTabs();

@@ -26,6 +26,13 @@ for (const env of requiredEnv) {
 const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
 const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
 
+// ==================== CIRCUIT BREAKER FOR BOT API ====================
+let circuitState = "CLOSED";
+let failureCount = 0;
+let lastFailureTime = 0;
+const FAILURE_THRESHOLD = 5;
+const OPEN_TIMEOUT = 30000;
+
 // ==================== MIGRATION FLAG ====================
 const SKIP_AUTO_MIGRATIONS = process.env.MANUAL_MIGRATION === "true";
 
@@ -50,7 +57,7 @@ app.use(compression({ level: 6, threshold: 512 }));
 // Rate limiting for API endpoints
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 200,
     message: { success: false, message: "Too many requests, please try again later." }
 });
 app.use("/api/", apiLimiter);
@@ -61,44 +68,82 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true
 });
 
-// ==================== BOT API CLIENT (WITH KEEP-ALIVE) ====================
+// ==================== BOT API CLIENT (WITH CIRCUIT BREAKER & KEEP-ALIVE) ====================
 const BOT_API_URL = process.env.BOT_API_URL;
 const API_SECRET = process.env.API_SECRET;
 
-async function callBotAPI(endpoint, body) {
+async function callBotAPI(endpoint, body, retries = 2) {
+    if (circuitState === "OPEN") {
+        if (Date.now() - lastFailureTime > OPEN_TIMEOUT) {
+            circuitState = "HALF_OPEN";
+            console.log(`🔌 Circuit breaker HALF_OPEN for ${endpoint}`);
+        } else {
+            throw new Error(`Bot API circuit breaker OPEN for ${endpoint}`);
+        }
+    }
+    
     const url = `${BOT_API_URL}${endpoint}`;
     const agent = url.startsWith("https") ? httpsAgent : httpAgent;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': API_SECRET
-        },
-        body: JSON.stringify(body),
-        agent: agent,
-        timeout: 10000
-    });
-    if (!response.ok) {
-        throw new Error(`Bot API error: ${response.status}`);
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_SECRET
+                },
+                body: JSON.stringify(body),
+                agent: agent,
+                timeout: 8000
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Bot API error: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (circuitState === "HALF_OPEN") {
+                circuitState = "CLOSED";
+                failureCount = 0;
+                console.log(`✅ Circuit breaker CLOSED for ${endpoint}`);
+            }
+            
+            return data;
+        } catch (err) {
+            console.warn(`Bot API call failed (attempt ${attempt}/${retries}): ${endpoint} - ${err.message}`);
+            
+            if (attempt === retries) {
+                failureCount++;
+                lastFailureTime = Date.now();
+                if (failureCount >= FAILURE_THRESHOLD) {
+                    circuitState = "OPEN";
+                    console.error(`🔴 Circuit breaker OPEN for ${endpoint}`);
+                }
+                throw err;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
     }
-    return response.json();
 }
 
 async function callBotAPIGet(endpoint) {
     const url = `${BOT_API_URL}${endpoint}`;
     const agent = url.startsWith("https") ? httpsAgent : httpAgent;
+    
     const response = await fetch(url, {
         method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': API_SECRET
-        },
+        headers: { 'X-API-Key': API_SECRET },
         agent: agent,
-        timeout: 10000
+        timeout: 8000
     });
+    
     if (!response.ok) {
         throw new Error(`Bot API error: ${response.status}`);
     }
+    
     return response.json();
 }
 
@@ -263,6 +308,13 @@ async function initDatabase() {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_active_round_selections_round ON active_round_selections(round_number)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)`);
+
+        // Add default sound pack setting if not exists
+        await client.query(`
+            INSERT INTO game_settings (key, value, description) 
+            VALUES ('default_sound_pack', 'pack1', 'Default sound pack for new players')
+            ON CONFLICT (key) DO NOTHING
+        `);
 
         console.log("✅ PostgreSQL core tables ready");
     } catch (err) {
@@ -525,7 +577,7 @@ function broadcastGameState() {
 }
 
 function broadcastTimer() { 
-    io.emit("timerUpdate", { seconds: gameState.timer, round: gameState.round, formatted: formatTime(gameState.timer) }); 
+    io.emit("timerUpdate", { seconds: gameState.timer, round: gameState.round, formatted: formatTime(gameState.timer), phase: gameState.status }); 
 }
 
 function stopGame() { 
@@ -835,7 +887,6 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
     if (!isValid) {
         return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-    // ✅ Admin token expires in 7 days (changed from 24 hours)
     const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "7d" });
     adminTokens.set(token, Date.now());
     res.json({ success: true, token });
@@ -875,6 +926,62 @@ app.post("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     }
 });
 
+// ==================== ENHANCED SOUND MANAGEMENT ENDPOINTS ====================
+
+// Get default sound pack
+app.get("/api/admin/default-sound-pack", verifyAdminToken, async (req, res) => {
+    try {
+        const result = await pool.query("SELECT value FROM game_settings WHERE key = 'default_sound_pack'");
+        const defaultPack = result.rows[0]?.value || 'pack1';
+        res.json({ success: true, defaultSoundPack: defaultPack });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// Set default sound pack for new players
+app.post("/api/admin/default-sound-pack", verifyAdminToken, async (req, res) => {
+    const { soundPack } = req.body;
+    const validPacks = ['pack1', 'pack2', 'pack3', 'pack4'];
+    
+    if (!validPacks.includes(soundPack)) {
+        return res.status(400).json({ success: false, message: "Invalid sound pack" });
+    }
+    
+    try {
+        await pool.query(`
+            INSERT INTO game_settings (key, value, description, updated_at) 
+            VALUES ('default_sound_pack', $1, 'Default sound pack for new players', NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        `, [soundPack]);
+        
+        res.json({ success: true, message: `Default sound pack set to ${soundPack}` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// Force sound pack for ALL currently connected players
+app.post("/api/admin/force-sound-pack", verifyAdminToken, async (req, res) => {
+    const { soundPack } = req.body;
+    const validPacks = ['pack1', 'pack2', 'pack3', 'pack4'];
+    
+    if (!validPacks.includes(soundPack)) {
+        return res.status(400).json({ success: false, message: "Invalid sound pack" });
+    }
+    
+    try {
+        // Broadcast to all connected players
+        io.emit("forceSoundPack", { soundPack });
+        console.log(`🔊 Admin forced sound pack to ${soundPack} for all ${io.engine.clientsCount} connected players`);
+        
+        res.json({ success: true, message: `All players forced to use ${soundPack} sound pack` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ==================== REST OF ADMIN ENDPOINTS ====================
 app.get("/api/admin/migrations", verifyAdminToken, async (req, res) => {
     try {
         const status = await getMigrationStatus();
@@ -1144,6 +1251,17 @@ app.get("/health", (req, res) => {
 io.on("connection", (socket) => {
     console.log(`🟢 New socket: ${socket.id}`);
 
+    // Send default sound pack to newly connected player
+    (async () => {
+        try {
+            const result = await pool.query("SELECT value FROM game_settings WHERE key = 'default_sound_pack'");
+            const defaultPack = result.rows[0]?.value || 'pack1';
+            socket.emit("defaultSoundPack", { soundPack: defaultPack });
+        } catch (err) {
+            console.error("Failed to send default sound pack:", err);
+        }
+    })();
+
     socket.on("authenticate", async (data) => {
         const { token } = data;
         if (!token) {
@@ -1254,7 +1372,12 @@ io.on("connection", (socket) => {
             if (gameState.status !== "selection") throw new Error(`Cannot select now (${gameState.status})`);
             if (player.selectedCartelas.length >= MAX_CARTELAS) throw new Error(`Max ${MAX_CARTELAS} cartelas per player`);
             if (player.selectedCartelas.includes(data.cartelaId)) throw new Error("Already selected");
-            if (player.balance < BET_AMOUNT) throw new Error(`Insufficient balance: ${player.balance} ETB`);
+            
+            const balanceResult = await callBotAPI("/api/balance", { telegram_id: player.telegramId });
+            if (!balanceResult.success || balanceResult.balance < BET_AMOUNT) {
+                throw new Error(`Insufficient balance: ${balanceResult.balance || 0} ETB. Need ${BET_AMOUNT} ETB`);
+            }
+            
             if (!isCartelaAvailable(data.cartelaId)) {
                 const takenBy = globalTakenCartelas.get(data.cartelaId);
                 throw new Error(`❌ Cartela ${data.cartelaId} already taken by ${takenBy.username}`);
@@ -1477,12 +1600,17 @@ async function startServer() {
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║              🎲 ESTIF BINGO 24/7 - ADVANCED EDITION (${TOTAL_CARTELAS} CARTELAS) 🎲    ║
+║              🎲 ESTIF BINGO 24/7 - ULTIMATE EDITION (${TOTAL_CARTELAS} CARTELAS) 🎲    ║
 ║                                                                           ║
 ║     ✅ MAX CARTELAS PER PLAYER: ${MAX_CARTELAS}                                           ║
 ║     ✅ BET AMOUNT: ${BET_AMOUNT} ETB                                           ║
 ║     ✅ SELECTION TIME: ${SELECTION_TIME} seconds                                         ║
 ║     ✅ DRAW INTERVAL: ${DRAW_INTERVAL/1000} seconds                                          ║
+║                                                                           ║
+║     ✅ CIRCUIT BREAKER PROTECTION ACTIVE                                  ║
+║     ✅ KEEP-ALIVE HTTP AGENTS ACTIVE                                      ║
+║     ✅ BOT INTEGRATION: Balance checks via Telegram                       ║
+║     ✅ SOUND MANAGEMENT: Admin can set default & force sound packs        ║
 ║                                                                           ║
 ║     📱 Player: ${PLAYER_URL}    ║
 ║     🔐 Admin:  ${ADMIN_URL}     ║
@@ -1493,8 +1621,7 @@ async function startServer() {
 ║     ✅ ${TOTAL_CARTELAS} unique cartelas loaded from JSON                        ║
 ║     ✅ Multi-device sync support                                          ║
 ║     ✅ Crash recovery with active_round_selections                        ║
-║     ✅ Keep-Alive HTTP Agent for faster bot communication                 ║
-║     ✅ Admin session expires in 7 days (was 24 hours)                     ║
+║     ✅ Admin session expires in 7 days                                    ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
         `);
     }); 

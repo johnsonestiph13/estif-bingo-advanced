@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Estif Bingo 24/7 – Smart Bingo</title>
     <style>
+        /* ==================== YOUR EXISTING CSS - NO CHANGES ==================== */
         * {
             margin: 0;
             padding: 0;
@@ -12,7 +13,6 @@
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         }
 
-        /* Telegram Dark Theme */
         body {
             background: #0e1621;
             color: #e4e6eb;
@@ -20,7 +20,6 @@
             min-height: 100vh;
         }
 
-        /* Header */
         .game-header {
             display: flex;
             justify-content: space-between;
@@ -72,7 +71,6 @@
             color: #2ecc71;
         }
 
-        /* Status Badge */
         .status-container {
             text-align: center;
             margin-bottom: 12px;
@@ -85,7 +83,6 @@
             font-size: 13px;
         }
 
-        /* Watch-only Banner */
         .watch-only {
             background: linear-gradient(135deg, #ff9800, #f57c00);
             text-align: center;
@@ -98,7 +95,6 @@
             font-size: 13px;
         }
 
-        /* Stats Bar */
         .stats-bar {
             display: flex;
             flex-wrap: wrap;
@@ -132,7 +128,6 @@
             50% { opacity: 0.5; }
         }
 
-        /* Cartelas Section */
         .cartelas-section {
             background: #17212b;
             border-radius: 16px;
@@ -170,7 +165,6 @@
             border-radius: 10px;
         }
 
-        /* Cartela Card */
         .cartela-card {
             background: #1f2c3a;
             border-radius: 12px;
@@ -226,7 +220,6 @@
             cursor: not-allowed;
         }
 
-        /* Info Section */
         .info-section {
             display: flex;
             flex-wrap: wrap;
@@ -278,7 +271,6 @@
             color: #e4e6eb;
         }
 
-        /* Winner Modal */
         .winner-modal {
             position: fixed;
             top: 0;
@@ -332,7 +324,6 @@
             to { opacity: 1; }
         }
 
-        /* Winner Cartela Grid */
         .winner-grid {
             background: #0f0f1a;
             border-radius: 16px;
@@ -359,7 +350,6 @@
             color: #1a1a2e;
         }
 
-        /* Sound Controls */
         .sound-controls {
             position: fixed;
             bottom: 16px;
@@ -378,7 +368,6 @@
             cursor: pointer;
         }
 
-        /* Connection Status */
         .connection-status {
             position: fixed;
             bottom: 18px;
@@ -396,7 +385,6 @@
             50% { opacity: 0.5; }
         }
 
-        /* Loading Overlay */
         #loadingOverlay {
             position: fixed;
             top: 0;
@@ -422,7 +410,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Responsive */
         @media (max-width: 550px) {
             body { padding: 8px; }
             .cartelas-grid { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; }
@@ -525,6 +512,8 @@
     let globalTakenCartelas = new Set();
     let playersList = [];
     let onlineCount = 0;
+    let reconnectAttempts = 0;
+    let heartbeatInterval = null;
 
     const BET_AMOUNT = 10;
     const MAX_CARTELAS = 4;
@@ -546,9 +535,9 @@
     const soundToggleBtn = document.getElementById('soundToggleBtn');
     const soundPackSelect = document.getElementById('soundPackSelect');
     const loadingOverlay = document.getElementById('loadingOverlay');
+    const connectionStatusEl = document.getElementById('connectionStatus');
 
     // ==================== IMMEDIATE CARTELA RENDERING ====================
-    // Render all 1000 cartelas RIGHT NOW (before any connection)
     function renderCartelasImmediately() {
         cartelasContainer.innerHTML = '';
         for (let i = 1; i <= TOTAL_CARTELAS; i++) {
@@ -564,19 +553,21 @@
         }
     }
     
-    // Call this IMMEDIATELY - page shows cartelas instantly
     renderCartelasImmediately();
 
     // ==================== HELPER FUNCTIONS ====================
-    function hideLoading() { if (loadingOverlay) loadingOverlay.style.display = 'none'; }
-    function showLoading() { if (loadingOverlay) loadingOverlay.style.display = 'flex'; }
+    function hideLoading() { 
+        if (loadingOverlay) loadingOverlay.style.display = 'none'; 
+    }
+    
+    function showLoading() { 
+        if (loadingOverlay) loadingOverlay.style.display = 'flex'; 
+    }
 
     function updateBalanceUI() {
         balanceEl.innerText = myBalance.toFixed(2) + ' ETB';
         const canPlay = myBalance >= BET_AMOUNT;
         watchOnlyMsg.style.display = canPlay ? 'none' : 'block';
-        
-        // Update button states based on balance
         updateSelectedUI();
     }
 
@@ -596,9 +587,10 @@
             if (isSelected) {
                 card.classList.add('selected');
                 if (btn) btn.innerText = '✓';
+                btn.disabled = true;
             } else {
                 card.classList.remove('selected');
-                if (btn && !isTaken && gameStatus === 'selection' && canAfford && mySelectedCartelas.length < MAX_CARTELAS) {
+                if (btn && !isTaken && gameStatus === 'selection' && canAfford && mySelectedCartelas.length < MAX_CARTELAS && socket && socket.connected) {
                     btn.innerText = 'Select';
                     btn.disabled = false;
                 } else if (btn) {
@@ -631,6 +623,14 @@
             showMessage('Cartela already taken', 2000);
             return;
         }
+        
+        // Disable button temporarily to prevent double-click
+        const btn = document.querySelector(`.cartela-card[data-id="${cartelaNumber}"] .select-btn`);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = '...';
+        }
+        
         socket.emit('selectCartela', { cartelaId: cartelaNumber, price: BET_AMOUNT }, (response) => {
             if (response && response.success) {
                 mySelectedCartelas.push(cartelaNumber);
@@ -640,6 +640,10 @@
                 playSound('select');
             } else if (response && response.error) {
                 showMessage(response.error, 2500);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = 'Select';
+                }
             }
         });
     }
@@ -683,7 +687,31 @@
         setTimeout(() => div.remove(), duration);
     }
 
-    function playSound(name) { /* optional - soundManager handles this */ }
+    function playSound(name) {
+        const soundEnabled = localStorage.getItem('soundEnabled') !== 'false';
+        if (!soundEnabled) return;
+        
+        if (name === 'select') {
+            try {
+                const audio = new Audio();
+                audio.volume = 0.3;
+                // Simple beep for selection feedback
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) {
+                    const ctx = new AudioContext();
+                    const oscillator = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    oscillator.connect(gain);
+                    gain.connect(ctx.destination);
+                    oscillator.frequency.value = 880;
+                    gain.gain.value = 0.1;
+                    oscillator.start();
+                    gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
+                    oscillator.stop(ctx.currentTime + 0.1);
+                }
+            } catch(e) { console.log('Sound error:', e); }
+        }
+    }
 
     // ==================== WINNER MODAL ====================
     function showWinnerModal(winnerName, cartelaId, amount, grid) {
@@ -728,6 +756,36 @@
                 modal.remove();
             }
         }, 1000);
+        
+        // Play win sound
+        try {
+            const audio = new Audio();
+            audio.volume = 0.5;
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                const ctx = new AudioContext();
+                const oscillator = ctx.createOscillator();
+                const gain = ctx.createGain();
+                oscillator.connect(gain);
+                gain.connect(ctx.destination);
+                oscillator.frequency.value = 440;
+                gain.gain.value = 0.2;
+                oscillator.start();
+                gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.5);
+                oscillator.stop(ctx.currentTime + 0.5);
+                setTimeout(() => {
+                    const osc2 = ctx.createOscillator();
+                    const gain2 = ctx.createGain();
+                    osc2.connect(gain2);
+                    gain2.connect(ctx.destination);
+                    osc2.frequency.value = 880;
+                    gain2.gain.value = 0.15;
+                    osc2.start();
+                    gain2.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.5);
+                    osc2.stop(ctx.currentTime + 0.5);
+                }, 300);
+            }
+        } catch(e) { console.log('Sound error:', e); }
     }
 
     function escapeHtml(str) {
@@ -737,8 +795,24 @@
 
     // ==================== SOCKET EVENTS ====================
     function connectWebSocket(token) {
-        socket = io(window.location.origin, { transports: ['websocket'] });
-        socket.on('connect', () => socket.emit('authenticate', { token }));
+        if (socket) {
+            socket.disconnect();
+        }
+        
+        socket = io(window.location.origin, { 
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            timeout: 20000
+        });
+        
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            reconnectAttempts = 0;
+            connectionStatusEl.className = 'connection-status connecting';
+            socket.emit('authenticate', { token });
+        });
         
         socket.on('authenticated', (data) => {
             userData = data.user;
@@ -747,8 +821,16 @@
             updateBalanceUI();
             updateSelectedUI();
             statusMsgEl.innerText = '✅ Connected';
-            document.getElementById('connectionStatus').className = 'connection-status connected';
+            connectionStatusEl.className = 'connection-status connected';
             hideLoading();
+            
+            // Start heartbeat
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (socket && socket.connected) {
+                    socket.emit('ping');
+                }
+            }, 30000);
         });
         
         socket.on('gameState', (state) => {
@@ -760,14 +842,35 @@
             winPercentEl.innerText = `${winPercentage}%`;
             poolEl.innerText = (state.totalBet || 0).toFixed(2) + ' ETB';
             playersCountEl.innerText = onlineCount;
-            statusMsgEl.innerText = state.status === 'selection' ? '🎯 SELECTION PHASE - Choose your cartelas!' : (state.status === 'active' ? '🎲 GAME ACTIVE - Numbers being drawn...' : '🏁 Round ended - Next round soon...');
+            statusMsgEl.innerText = state.status === 'selection' ? '🎯 SELECTION PHASE - Choose your cartelas!' : (state.status === 'active' ? '🎲 GAME ACTIVE - Numbers being drawn!' : '🏁 Round ended - Next round soon...');
             updateSelectedUI();
         });
         
         socket.on('timerUpdate', (data) => {
             timerEl.innerText = data.seconds;
-            if (data.phase === 'selection' && data.seconds <= 10) timerEl.classList.add('blinking');
-            else timerEl.classList.remove('blinking');
+            if (data.phase === 'selection' && data.seconds <= 10) {
+                timerEl.classList.add('blinking');
+                // Play countdown tick at 10,5,3,2,1
+                if ([10,5,3,2,1].includes(data.seconds)) {
+                    try {
+                        const AudioContext = window.AudioContext || window.webkitAudioContext;
+                        if (AudioContext) {
+                            const ctx = new AudioContext();
+                            const oscillator = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            oscillator.connect(gain);
+                            gain.connect(ctx.destination);
+                            oscillator.frequency.value = 880;
+                            gain.gain.value = 0.08;
+                            oscillator.start();
+                            gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1);
+                            oscillator.stop(ctx.currentTime + 0.1);
+                        }
+                    } catch(e) {}
+                }
+            } else {
+                timerEl.classList.remove('blinking');
+            }
         });
         
         socket.on('balanceUpdated', (data) => {
@@ -796,19 +899,29 @@
         socket.on('numberDrawn', (data) => {
             drawnNumbers.push(data.number);
             updateDrawnNumbersUI();
+            
+            // Animate current number
+            const currentNumberDiv = document.querySelector('.current-number');
+            if (currentNumberDiv) {
+                currentNumberDiv.innerHTML = `<div class="number-ball" style="animation: popIn 0.3s ease-out;">${data.number}</div>`;
+                setTimeout(() => {
+                    if (currentNumberDiv.firstChild) {
+                        currentNumberDiv.firstChild.style.animation = '';
+                    }
+                }, 300);
+            }
         });
         
         socket.on('roundEnded', (data) => {
             gameStatus = 'ended';
             if (data.winners && data.winners.length) {
-                showMessage(`🏆 Winners: ${data.winners.join(', ')} each won ${(data.prizePerWinner || 0).toFixed(2)} ETB`, 4000);
+                showMessage(`🏆 Winners: ${data.winners.join(', ')} each won ${(data.prizePerWinner || 0).toFixed(2)} ETB`, 5000);
             }
         });
         
         socket.on('youWon', async (data) => {
             myBalance = data.newBalance;
             updateBalanceUI();
-            // Load winning cartela grid
             let grid = null;
             try {
                 const resp = await fetch(`/api/cartela/${data.cartelaId}`);
@@ -837,9 +950,31 @@
         });
         
         socket.on('error', (err) => showMessage(err.message, 3000));
+        
         socket.on('disconnect', () => {
-            document.getElementById('connectionStatus').className = 'connection-status disconnected';
+            connectionStatusEl.className = 'connection-status disconnected';
             statusMsgEl.innerText = '🔴 Disconnected, reconnecting...';
+            updateSelectedUI();
+        });
+        
+        socket.on('connect_error', (err) => {
+            console.error('Connection error:', err);
+            connectionStatusEl.className = 'connection-status disconnected';
+            statusMsgEl.innerText = '⚠️ Connection error, retrying...';
+        });
+        
+        socket.on('reconnect_attempt', (attempt) => {
+            reconnectAttempts = attempt;
+            statusMsgEl.innerText = `🔄 Reconnecting (attempt ${attempt})...`;
+        });
+        
+        socket.on('reconnect', () => {
+            statusMsgEl.innerText = '✅ Reconnected!';
+            setTimeout(() => {
+                if (gameStatus === 'selection') {
+                    statusMsgEl.innerText = '🎯 SELECTION PHASE - Choose your cartelas!';
+                }
+            }, 2000);
         });
     }
 
@@ -848,25 +983,41 @@
         showLoading();
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
+        
         if (!code) {
             showMessage('No authentication code. Use Telegram bot to play.', 5000);
+            statusMsgEl.innerText = '⚠️ No auth code';
             hideLoading();
             return;
         }
+        
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            
             const resp = await fetch('/api/exchange-code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code })
+                body: JSON.stringify({ code }),
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
             const data = await resp.json();
-            if (!data.success) throw new Error(data.error);
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Authentication failed');
+            }
+            
             userData = data.user;
             myBalance = userData.balance;
             updateBalanceUI();
             connectWebSocket(data.token);
+            
         } catch (err) {
-            showMessage('Authentication failed: ' + err.message, 5000);
+            console.error('Auth error:', err);
+            statusMsgEl.innerText = '⚠️ Authentication failed';
+            showMessage('Failed to connect. Please try again.', 5000);
             hideLoading();
         }
     }
@@ -877,14 +1028,29 @@
         localStorage.setItem('soundEnabled', !isOn);
         soundToggleBtn.innerText = !isOn ? '🔊 Sound On' : '🔇 Sound Off';
     });
+    
     soundPackSelect.addEventListener('change', (e) => {
         localStorage.setItem('soundPack', e.target.value);
     });
+    
     const savedSound = localStorage.getItem('soundEnabled') !== 'false';
     soundToggleBtn.innerText = savedSound ? '🔊 Sound On' : '🔇 Sound Off';
     const savedPack = localStorage.getItem('soundPack') || 'pack1';
     soundPackSelect.value = savedPack;
 
+    // Add current number display element if not exists
+    const currentNumberContainer = document.querySelector('.current-number-container');
+    if (!currentNumberContainer) {
+        const statsBar = document.querySelector('.stats-bar');
+        const newDiv = document.createElement('div');
+        newDiv.className = 'current-number-container';
+        newDiv.style.textAlign = 'center';
+        newDiv.style.margin = '15px 0';
+        newDiv.innerHTML = '<div class="current-number"></div>';
+        if (statsBar) statsBar.insertAdjacentElement('afterend', newDiv);
+    }
+
+    // Start the game
     init();
 </script>
 </body>
