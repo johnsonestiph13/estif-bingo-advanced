@@ -20,13 +20,11 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from bot.db.database import database
-from bot.config import Config
+from bot.config import config
+from bot.utils import logger
 from bot.texts.emojis import get_emoji
 
-# ==================== OPTIMIZED LOGGING ====================
-logger = logging.getLogger(__name__)
-
-# ==================== CACHE MANAGEMENT ====================
+# ==================== OPTIMIZED CACHE MANAGEMENT ====================
 class GameCache:
     """Ultra-fast in-memory cache for game data"""
     
@@ -37,7 +35,6 @@ class GameCache:
         self._misses = 0
     
     def get(self, key: str) -> Optional[Any]:
-        """Get cached value with TTL check"""
         if key in self._cache:
             value, timestamp = self._cache[key]
             if time.time() - timestamp < self._ttl:
@@ -49,15 +46,12 @@ class GameCache:
         return None
     
     def set(self, key: str, value: Any):
-        """Set cached value"""
         self._cache[key] = (value, time.time())
     
     def clear(self):
-        """Clear all cache"""
         self._cache.clear()
     
     def stats(self) -> Dict:
-        """Get cache statistics"""
         total = self._hits + self._misses
         hit_rate = (self._hits / total * 100) if total > 0 else 0
         return {
@@ -73,7 +67,6 @@ game_cache = GameCache(ttl_seconds=120)
 # ==================== DATA CLASSES ====================
 @dataclass
 class GameSession:
-    """Game session data"""
     telegram_id: int
     username: str
     balance: float
@@ -92,7 +85,6 @@ class GameSession:
 
 @dataclass
 class GameStats:
-    """Player game statistics"""
     games_played: int = 0
     games_won: int = 0
     total_bet: float = 0
@@ -110,126 +102,8 @@ class GameStats:
     def net_profit(self) -> float:
         return self.total_win - self.total_bet
 
-# ==================== MESSAGE TEMPLATES ====================
-class GameMessages:
-    """Optimized message templates with emojis"""
-    
-    WELCOME = f"""
-{get_emoji('game')} <b>ESTIF BINGO 24/7</b> {get_emoji('game')}
-
-{get_emoji('money')} <b>Balance:</b> <code>{{balance:.2f}} ETB</code>
-{get_emoji('cartela')} <b>Cartela Price:</b> <code>{{cartela_price}} ETB</code>
-{get_emoji('stats')} <b>Max Cartelas:</b> <code>{{max_cartelas}}</code>
-{get_emoji('target')} <b>Win Rate:</b> <code>{{win_percentage}}%</code>
-{get_emoji('users')} <b>Active Players:</b> <code>{{active_players}}</code>
-
-{get_emoji('play')} <b>How to Play:</b>
-• Select 1-4 cartelas per round
-• Numbers are drawn automatically
-• Match patterns to win!
-• Win up to {{win_percentage}}% of pool!
-
-{get_emoji('click')} <b>Click the button below to start!</b>
-"""
-    
-    INSUFFICIENT_BALANCE = f"""
-{get_emoji('error')} <b>Insufficient Balance!</b>
-
-{get_emoji('money')} Your Balance: <code>{{balance:.2f}} ETB</code>
-{get_emoji('cartela')} Need at least: <code>{{min_needed}} ETB</code>
-
-{get_emoji('deposit')} <b>Add funds via /deposit</b>
-{get_emoji('gift')} Get <b>bonus</b> on first deposit!
-"""
-    
-    GAME_START = f"""
-{get_emoji('play')} <b>Game Started!</b>
-
-{get_emoji('stats')} <b>Session Details:</b>
-• Cartelas: <code>{{cartelas}}</code>
-• Cost: <code>{{cost:.2f}} ETB</code>
-• New Balance: <code>{{new_balance:.2f}} ETB</code>
-
-{get_emoji('target')} <b>Win Chance:</b> <code>{{win_percentage}}%</code>
-{get_emoji('clock')} <b>Round Duration:</b> <code>{{round_duration}}s</code>
-
-{get_emoji('four_leaf_clover')} <b>Good luck! May the numbers be with you!</b>
-"""
-    
-    GAME_WIN = f"""
-{get_emoji('win')} <b>CONGRATULATIONS! YOU WON!</b> {get_emoji('win')}
-
-{get_emoji('money')} <b>Winnings:</b> <code>+{{amount:.2f}} ETB</code>
-{get_emoji('balance')} <b>New Balance:</b> <code>{{new_balance:.2f}} ETB</code>
-{get_emoji('trophy')} <b>Total Wins:</b> <code>{{total_wins}}</code>
-{get_emoji('star')} <b>Win Rate:</b> <code>{{win_rate:.1f}}%</code>
-
-{get_emoji('target')} <b>Pattern:</b> {{pattern}}
-{get_emoji('cartela')} <b>Cartela:</b> {{cartela_id}}
-
-{get_emoji('refresh')} <b>Play again?</b> Use /play
-"""
-    
-    GAME_LOSS = f"""
-{get_emoji('lose')} <b>Better Luck Next Time!</b>
-
-{get_emoji('stats')} <b>Round Stats:</b>
-• Numbers Drawn: <code>{{numbers_drawn}}</code>
-• Closest Pattern: <code>{{closest_pattern}}</code>
-
-{get_emoji('money')} <b>Current Balance:</b> <code>{{balance:.2f}} ETB</code>
-{get_emoji('star')} <b>Win Rate:</b> <code>{{win_rate:.1f}}%</code>
-
-{get_emoji('muscle')} <b>Don't give up!</b> Your win is coming!
-{get_emoji('refresh')} <b>Play again:</b> /play
-"""
-    
-    STATS = f"""
-{get_emoji('stats')} <b>YOUR BINGO STATISTICS</b>
-
-{get_emoji('game')} <b>Games:</b>
-• Played: <code>{{games_played}}</code>
-• Won: <code>{{games_won}}</code>
-• Win Rate: <code>{{win_rate:.1f}}%</code>
-
-{get_emoji('money')} <b>Financial:</b>
-• Total Bet: <code>{{total_bet:.2f}} ETB</code>
-• Total Win: <code>{{total_win:.2f}} ETB</code>
-• Net Profit: <code>{{net_profit:+.2f}} ETB</code>
-• Best Win: <code>{{best_win:.2f}} ETB</code>
-
-{get_emoji('clock')} <b>Last Played:</b> {{last_played}}
-
-{get_emoji('trophy')} <b>Rank:</b> #{{rank}}
-"""
-    
-    LEADERBOARD = f"""
-{get_emoji('trophy')} <b>BINGO LEADERBOARD</b> {get_emoji('trophy')}
-
-{{entries}}
-
-{get_emoji('calendar')} <b>Updated:</b> {{timestamp}}
-{get_emoji('target')} <b>Win to climb the ranks!</b>
-"""
-    
-    QUICK_PLAY = f"""
-{get_emoji('lightning')} <b>QUICK PLAY</b> {get_emoji('lightning')}
-
-{get_emoji('money')} <b>Balance:</b> {{balance:.2f}} ETB
-
-<b>Choose cartelas:</b>
-• 1 Cartela: {{price1}} ETB
-• 2 Cartelas: {{price2}} ETB
-• 3 Cartelas: {{price3}} ETB
-• 4 Cartelas: {{price4}} ETB
-
-{get_emoji('target')} <b>Auto-play available!</b> Set and forget!
-"""
-
 # ==================== GAME SESSION MANAGER ====================
 class GameSessionManager:
-    """Manages active game sessions with auto-cleanup"""
-    
     def __init__(self, cleanup_interval: int = 60):
         self._sessions: Dict[int, GameSession] = {}
         self._cleanup_interval = cleanup_interval
@@ -237,11 +111,9 @@ class GameSessionManager:
         self._lock = asyncio.Lock()
     
     async def start(self):
-        """Start session cleanup daemon"""
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
     
     async def _cleanup_loop(self):
-        """Periodically clean expired sessions"""
         while True:
             try:
                 await asyncio.sleep(self._cleanup_interval)
@@ -250,7 +122,6 @@ class GameSessionManager:
                 logger.error(f"Session cleanup error: {e}")
     
     async def cleanup_expired(self):
-        """Remove expired sessions"""
         async with self._lock:
             expired = [
                 tid for tid, session in self._sessions.items()
@@ -263,7 +134,6 @@ class GameSessionManager:
     
     async def create_session(self, telegram_id: int, username: str, 
                              balance: float, auth_code: str) -> GameSession:
-        """Create new game session"""
         async with self._lock:
             session = GameSession(
                 telegram_id=telegram_id,
@@ -277,7 +147,6 @@ class GameSessionManager:
             return session
     
     async def get_session(self, telegram_id: int) -> Optional[GameSession]:
-        """Get active session"""
         async with self._lock:
             session = self._sessions.get(telegram_id)
             if session and session.is_expired():
@@ -286,7 +155,6 @@ class GameSessionManager:
             return session
     
     async def update_session(self, telegram_id: int, **kwargs):
-        """Update session data"""
         async with self._lock:
             session = self._sessions.get(telegram_id)
             if session:
@@ -295,7 +163,6 @@ class GameSessionManager:
                         setattr(session, key, value)
     
     async def end_session(self, telegram_id: int):
-        """End and remove session"""
         async with self._lock:
             if telegram_id in self._sessions:
                 del self._sessions[telegram_id]
@@ -303,13 +170,10 @@ class GameSessionManager:
     def get_active_count(self) -> int:
         return len(self._sessions)
 
-# Global session manager
 session_manager = GameSessionManager()
 
 # ==================== STATISTICS MANAGER ====================
 class StatsManager:
-    """Manages player statistics with caching"""
-    
     @staticmethod
     @lru_cache(maxsize=1000)
     async def get_player_stats(telegram_id: int) -> GameStats:
@@ -404,6 +268,11 @@ class StatsManager:
             logger.error(f"Active players count error: {e}")
             return 0
 
+# ==================== MESSAGE HELPERS ====================
+def _msg(text: str) -> str:
+    """Helper to create message templates"""
+    return text
+
 # ==================== MAIN HANDLER ====================
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user: User = update.effective_user
@@ -424,18 +293,18 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if not user_data or not user_data.get('registered'):
             await update.message.reply_text(
-                "❌ Please register first using /register",
+                f"{get_emoji('error')} Please register first using /register",
                 parse_mode=ParseMode.HTML
             )
             return
         
-        min_needed = Config.MIN_BALANCE_FOR_PLAY
+        min_needed = config.MIN_BALANCE_FOR_PLAY
         if balance < min_needed:
             await update.message.reply_text(
-                GameMessages.INSUFFICIENT_BALANCE.format(
-                    balance=balance,
-                    min_needed=min_needed
-                ),
+                f"{get_emoji('error')} <b>Insufficient Balance!</b>\n\n"
+                f"{get_emoji('money')} Your Balance: <code>{balance:.2f} ETB</code>\n"
+                f"{get_emoji('cartela')} Need at least: <code>{min_needed} ETB</code>\n\n"
+                f"{get_emoji('deposit')} <b>Add funds via /deposit</b>",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -443,7 +312,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auth_code = await database.create_auth_code(telegram_id)
         await session_manager.create_session(telegram_id, username, balance, auth_code)
         
-        web_app_url = f"{Config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&v={int(time.time())}"
+        web_app_url = f"{config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&v={int(time.time())}"
         
         keyboard = [
             [InlineKeyboardButton(
@@ -463,17 +332,26 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        welcome_msg = (
+            f"{get_emoji('game')} <b>ESTIF BINGO 24/7</b> {get_emoji('game')}\n\n"
+            f"{get_emoji('money')} <b>Balance:</b> <code>{balance:.2f} ETB</code>\n"
+            f"{get_emoji('cartela')} <b>Cartela Price:</b> <code>{config.CARTELA_PRICE} ETB</code>\n"
+            f"{get_emoji('stats')} <b>Max Cartelas:</b> <code>{config.MAX_CARTELAS}</code>\n"
+            f"{get_emoji('target')} <b>Win Rate:</b> <code>{win_percentage}%</code>\n"
+            f"{get_emoji('users')} <b>Active Players:</b> <code>{active_players}</code>\n\n"
+            f"{get_emoji('play')} <b>How to Play:</b>\n"
+            f"• Select 1-4 cartelas per round\n"
+            f"• Numbers are drawn automatically\n"
+            f"• Match patterns to win!\n"
+            f"• Win up to {win_percentage}% of pool!\n\n"
+            f"{get_emoji('click')} <b>Click the button below to start!</b>"
+        )
+        
         response_time = (time.time() - start_time) * 1000
         logger.info(f"Play command for {telegram_id} in {response_time:.2f}ms")
         
         await update.message.reply_text(
-            GameMessages.WELCOME.format(
-                balance=balance,
-                cartela_price=Config.CARTELA_PRICE,
-                max_cartelas=Config.MAX_CARTELAS,
-                win_percentage=win_percentage,
-                active_players=active_players
-            ),
+            welcome_msg,
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
@@ -515,7 +393,7 @@ async def game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ACTION HANDLERS ====================
 async def handle_game_start(update: Update, game_data: Dict, telegram_id: int):
     cartelas = game_data.get('cartelas', 1)
-    cost = cartelas * Config.CARTELA_PRICE
+    cost = cartelas * config.CARTELA_PRICE
     
     balance = await database.get_balance(telegram_id)
     win_percentage = await database.get_win_percentage()
@@ -526,16 +404,18 @@ async def handle_game_start(update: Update, game_data: Dict, telegram_id: int):
         total_spent=cost
     )
     
-    await update.message.reply_text(
-        GameMessages.GAME_START.format(
-            cartelas=cartelas,
-            cost=cost,
-            new_balance=balance - cost,
-            win_percentage=win_percentage,
-            round_duration=Config.SELECTION_TIME
-        ),
-        parse_mode=ParseMode.HTML
+    msg = (
+        f"{get_emoji('play')} <b>Game Started!</b>\n\n"
+        f"{get_emoji('stats')} <b>Session Details:</b>\n"
+        f"• Cartelas: <code>{cartelas}</code>\n"
+        f"• Cost: <code>{cost:.2f} ETB</code>\n"
+        f"• New Balance: <code>{balance - cost:.2f} ETB</code>\n\n"
+        f"{get_emoji('target')} <b>Win Chance:</b> <code>{win_percentage}%</code>\n"
+        f"{get_emoji('clock')} <b>Round Duration:</b> <code>{config.SELECTION_TIME}s</code>\n\n"
+        f"{get_emoji('four_leaf_clover')} <b>Good luck!</b>"
     )
+    
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def handle_game_result(update: Update, game_data: Dict, telegram_id: int):
     won = game_data.get('won', False)
@@ -552,41 +432,43 @@ async def handle_game_result(update: Update, game_data: Dict, telegram_id: int):
         await session_manager.update_session(telegram_id, total_won=amount)
         game_cache.clear()
         
-        await update.message.reply_text(
-            GameMessages.GAME_WIN.format(
-                amount=amount,
-                new_balance=new_balance,
-                total_wins=stats.games_won + 1,
-                win_rate=stats.win_rate,
-                pattern=pattern,
-                cartela_id=cartela_id
-            ),
-            parse_mode=ParseMode.HTML
+        msg = (
+            f"{get_emoji('win')} <b>CONGRATULATIONS! YOU WON!</b> {get_emoji('win')}\n\n"
+            f"{get_emoji('money')} <b>Winnings:</b> <code>+{amount:.2f} ETB</code>\n"
+            f"{get_emoji('balance')} <b>New Balance:</b> <code>{new_balance:.2f} ETB</code>\n"
+            f"{get_emoji('trophy')} <b>Total Wins:</b> <code>{stats.games_won + 1}</code>\n"
+            f"{get_emoji('star')} <b>Win Rate:</b> <code>{stats.win_rate:.1f}%</code>\n\n"
+            f"{get_emoji('target')} <b>Pattern:</b> {pattern}\n"
+            f"{get_emoji('cartela')} <b>Cartela:</b> {cartela_id}\n\n"
+            f"{get_emoji('refresh')} <b>Play again?</b> Use /play"
         )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     else:
-        await update.message.reply_text(
-            GameMessages.GAME_LOSS.format(
-                numbers_drawn=numbers_drawn,
-                closest_pattern=closest_pattern,
-                balance=new_balance,
-                win_rate=stats.win_rate
-            ),
-            parse_mode=ParseMode.HTML
+        msg = (
+            f"{get_emoji('lose')} <b>Better Luck Next Time!</b>\n\n"
+            f"{get_emoji('stats')} <b>Round Stats:</b>\n"
+            f"• Numbers Drawn: <code>{numbers_drawn}</code>\n"
+            f"• Closest Pattern: <code>{closest_pattern}</code>\n\n"
+            f"{get_emoji('money')} <b>Current Balance:</b> <code>{new_balance:.2f} ETB</code>\n"
+            f"{get_emoji('star')} <b>Win Rate:</b> <code>{stats.win_rate:.1f}%</code>\n\n"
+            f"{get_emoji('muscle')} <b>Don't give up!</b> Your win is coming!\n"
+            f"{get_emoji('refresh')} <b>Play again:</b> /play"
         )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def handle_game_end(update: Update, telegram_id: int):
     session = await session_manager.get_session(telegram_id)
     if session:
         net_result = session.total_won - session.total_spent
-        await update.message.reply_text(
+        msg = (
             f"{get_emoji('stats')} <b>Session Summary</b>\n\n"
             f"• {get_emoji('cartela')} Cartelas: {session.cartelas_purchased}\n"
             f"• {get_emoji('money')} Spent: {session.total_spent:.2f} ETB\n"
             f"• {get_emoji('win')} Won: {session.total_won:.2f} ETB\n"
             f"• {get_emoji('balance')} Net: <code>{net_result:+.2f} ETB</code>\n\n"
-            f"{get_emoji('refresh')} Play again with /play",
-            parse_mode=ParseMode.HTML
+            f"{get_emoji('refresh')} Play again with /play"
         )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         await session_manager.end_session(telegram_id)
 
 async def handle_game_error(update: Update, game_data: Dict, telegram_id: int):
@@ -606,7 +488,7 @@ async def quick_play_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     telegram_id = query.from_user.id
     
     auth_code = await database.create_auth_code(telegram_id)
-    web_app_url = f"{Config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&cartelas={cartelas}&quick=true"
+    web_app_url = f"{config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&cartelas={cartelas}&quick=true"
     
     keyboard = [[
         InlineKeyboardButton(
@@ -616,11 +498,15 @@ async def quick_play_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    msg = (
         f"{get_emoji('lightning')} <b>Quick Play - {cartelas} Cartela{'s' if cartelas > 1 else ''}</b>\n\n"
-        f"{get_emoji('money')} Cost: {cartelas * Config.CARTELA_PRICE} ETB\n"
+        f"{get_emoji('money')} Cost: {cartelas * config.CARTELA_PRICE} ETB\n"
         f"{get_emoji('target')} Win Chance: {await database.get_win_percentage()}%\n\n"
-        f"Click below to start!",
+        f"Click below to start!"
+    )
+    
+    await query.edit_message_text(
+        msg,
         reply_markup=reply_markup,
         parse_mode=ParseMode.HTML
     )
@@ -635,18 +521,23 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     rank = next((i + 1 for i, p in enumerate(leaderboard) if p['telegram_id'] == telegram_id), None)
     
+    msg = (
+        f"{get_emoji('stats')} <b>YOUR BINGO STATISTICS</b>\n\n"
+        f"{get_emoji('game')} <b>Games:</b>\n"
+        f"• Played: <code>{stats.games_played}</code>\n"
+        f"• Won: <code>{stats.games_won}</code>\n"
+        f"• Win Rate: <code>{stats.win_rate:.1f}%</code>\n\n"
+        f"{get_emoji('money')} <b>Financial:</b>\n"
+        f"• Total Bet: <code>{stats.total_bet:.2f} ETB</code>\n"
+        f"• Total Win: <code>{stats.total_win:.2f} ETB</code>\n"
+        f"• Net Profit: <code>{stats.net_profit:+.2f} ETB</code>\n"
+        f"• Best Win: <code>{stats.best_win:.2f} ETB</code>\n\n"
+        f"{get_emoji('clock')} <b>Last Played:</b> {stats.last_played.strftime('%Y-%m-%d %H:%M') if stats.last_played else 'Never'}\n\n"
+        f"{get_emoji('trophy')} <b>Rank:</b> #{rank or 'Unranked'}"
+    )
+    
     await query.edit_message_text(
-        GameMessages.STATS.format(
-            games_played=stats.games_played,
-            games_won=stats.games_won,
-            win_rate=stats.win_rate,
-            total_bet=stats.total_bet,
-            total_win=stats.total_win,
-            net_profit=stats.net_profit,
-            best_win=stats.best_win,
-            last_played=stats.last_played.strftime("%Y-%m-%d %H:%M") if stats.last_played else "Never",
-            rank=rank or "Unranked"
-        ),
+        msg,
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton(f"{get_emoji('back')} Back to Game", callback_data="back_to_game")
@@ -662,17 +553,30 @@ async def leaderboard_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if not leaderboard:
         entries = f"{get_emoji('trophy')} <i>No players yet. Be the first!</i>"
     else:
-        entries = "\n".join([
-            f"{'🥇' if p['rank'] == 1 else '🥈' if p['rank'] == 2 else '🥉' if p['rank'] == 3 else f'{p["rank"]}️⃣'} "
-            f"<b>{p['username'][:15]}</b> - {p['total_won']:.0f} ETB won (Win Rate: {p['win_rate']})"
-            for p in leaderboard
-        ])
+        entries_list = []
+        for p in leaderboard:
+            if p['rank'] == 1:
+                emoji = '🥇'
+            elif p['rank'] == 2:
+                emoji = '🥈'
+            elif p['rank'] == 3:
+                emoji = '🥉'
+            else:
+                emoji = f"{p['rank']}️⃣"
+            entries_list.append(
+                f"{emoji} <b>{p['username'][:15]}</b> - {p['total_won']:.0f} ETB won (Win Rate: {p['win_rate']})"
+            )
+        entries = "\n".join(entries_list)
+    
+    msg = (
+        f"{get_emoji('trophy')} <b>BINGO LEADERBOARD</b> {get_emoji('trophy')}\n\n"
+        f"{entries}\n\n"
+        f"{get_emoji('calendar')} <b>Updated:</b> {datetime.now().strftime('%H:%M:%S')}\n"
+        f"{get_emoji('target')} <b>Win to climb the ranks!</b>"
+    )
     
     await query.edit_message_text(
-        GameMessages.LEADERBOARD.format(
-            entries=entries,
-            timestamp=datetime.now().strftime("%H:%M:%S")
-        ),
+        msg,
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton(f"{get_emoji('refresh')} Refresh", callback_data="game_leaderboard"),
@@ -687,7 +591,6 @@ async def back_to_game_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ==================== SESSION CLEANUP ====================
 async def start_game_handlers():
-    """Start background tasks for game handlers"""
     await session_manager.start()
     logger.info(f"{get_emoji('game')} Game handlers initialized")
 
