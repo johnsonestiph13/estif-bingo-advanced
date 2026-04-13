@@ -39,7 +39,7 @@ nest-asyncio==1.5.8
 # ==================== HTTP & NETWORK ====================
 # HTTP Requests
 requests==2.31.0
-httpx==0.25.1  # Modern async HTTP client
+httpx==0.25.2  # Modern async HTTP client
 aiohttp==3.9.1  # Async HTTP client
 
 # WebSocket Support
