@@ -14,7 +14,7 @@ from bot.texts.emojis import get_emoji
 logger = logging.getLogger(__name__)
 
 # Conversation states
-PHONE = 1  # State for waiting for phone number
+PHONE = 1
 
 # Welcome bonus amount
 WELCOME_BONUS_AMOUNT = 30
@@ -56,7 +56,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         phone = update.message.contact.phone_number
     else:
         phone = update.message.text.strip()
-        # Validate phone format
         if not is_valid_phone(phone):
             await update.message.reply_text(
                 f"{get_emoji('error')} Invalid phone number format.\n\n"
@@ -70,7 +69,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = existing.get('lang', 'en') if existing else 'en'
     
     if existing:
-        # Update existing user
         await Database.update_user(
             telegram_id,
             phone=phone,
@@ -78,7 +76,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             joined_group=True
         )
         
-        # Give welcome bonus if balance is zero
         current_balance = await Database.get_balance(telegram_id)
         if current_balance == 0:
             await Database.add_balance(telegram_id, WELCOME_BONUS_AMOUNT, "welcome_bonus")
@@ -88,7 +85,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
     else:
-        # Create new user
         await Database.create_user(
             telegram_id,
             user.username or "",
@@ -99,7 +95,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await Database.add_balance(telegram_id, WELCOME_BONUS_AMOUNT, "welcome_bonus")
     
-    # Send success message
     new_balance = await Database.get_balance(telegram_id)
     await update.message.reply_text(
         f"{get_emoji('success')} <b>Registration Successful!</b>\n\n"
@@ -110,7 +105,6 @@ async def register_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # Notify admin
     await context.bot.send_message(
         chat_id=config.ADMIN_CHAT_ID,
         text=f"{get_emoji('new')} <b>NEW REGISTRATION</b>\n"
@@ -154,12 +148,10 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Generate one-time auth code
     try:
         code = await Database.create_auth_code(telegram_id)
         game_url = f"{config.GAME_WEB_URL}?code={code}&telegram_id={telegram_id}"
         
-        # Create inline keyboard with the game link
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"{get_emoji('game')} Play Now {get_emoji('game')}", url=game_url)]
         ])
@@ -179,11 +171,17 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ==================== BACKWARD COMPATIBILITY ====================
+# Alias for older code that expects 'handle_contact'
+handle_contact = register_phone
+
+
 # Export all
 __all__ = [
     'register',
     'register_phone',
     'register_cancel',
+    'handle_contact',  # For backward compatibility
     'play',
     'PHONE',
 ]
