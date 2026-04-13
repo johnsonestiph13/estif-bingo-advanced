@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from functools import lru_cache
 from collections import defaultdict
 import logging
@@ -21,6 +21,7 @@ from telegram.constants import ParseMode
 
 from bot.db.database import database
 from bot.config import Config
+from bot.texts.emojis import get_emoji
 
 # ==================== OPTIMIZED LOGGING ====================
 logger = logging.getLogger(__name__)
@@ -113,116 +114,116 @@ class GameStats:
 class GameMessages:
     """Optimized message templates with emojis"""
     
-    WELCOME = """
-🎲 <b>ESTIF BINGO 24/7</b> 🎲
+    WELCOME = f"""
+{get_emoji('game')} <b>ESTIF BINGO 24/7</b> {get_emoji('game')}
 
-💰 <b>Balance:</b> <code>{balance:.2f} ETB</code>
-🎫 <b>Cartela Price:</b> <code>{cartela_price} ETB</code>
-📊 <b>Max Cartelas:</b> <code>{max_cartelas}</code>
-🎯 <b>Win Rate:</b> <code>{win_percentage}%</code>
-👥 <b>Active Players:</b> <code>{active_players}</code>
+{get_emoji('money')} <b>Balance:</b> <code>{{balance:.2f}} ETB</code>
+{get_emoji('cartela')} <b>Cartela Price:</b> <code>{{cartela_price}} ETB</code>
+{get_emoji('stats')} <b>Max Cartelas:</b> <code>{{max_cartelas}}</code>
+{get_emoji('target')} <b>Win Rate:</b> <code>{{win_percentage}}%</code>
+{get_emoji('users')} <b>Active Players:</b> <code>{{active_players}}</code>
 
-🎮 <b>How to Play:</b>
+{get_emoji('play')} <b>How to Play:</b>
 • Select 1-4 cartelas per round
 • Numbers are drawn automatically
 • Match patterns to win!
-• Win up to {win_percentage}% of pool!
+• Win up to {{win_percentage}}% of pool!
 
-👇 <b>Click the button below to start!</b>
+{get_emoji('click')} <b>Click the button below to start!</b>
 """
     
-    INSUFFICIENT_BALANCE = """
-❌ <b>Insufficient Balance!</b>
+    INSUFFICIENT_BALANCE = f"""
+{get_emoji('error')} <b>Insufficient Balance!</b>
 
-💰 Your Balance: <code>{balance:.2f} ETB</code>
-🎫 Need at least: <code>{min_needed} ETB</code>
+{get_emoji('money')} Your Balance: <code>{{balance:.2f}} ETB</code>
+{get_emoji('cartela')} Need at least: <code>{{min_needed}} ETB</code>
 
-💳 <b>Add funds via /deposit</b>
-🎁 Get <b>bonus</b> on first deposit!
+{get_emoji('deposit')} <b>Add funds via /deposit</b>
+{get_emoji('gift')} Get <b>bonus</b> on first deposit!
 """
     
-    GAME_START = """
-🎮 <b>Game Started!</b>
+    GAME_START = f"""
+{get_emoji('play')} <b>Game Started!</b>
 
-📊 <b>Session Details:</b>
-• Cartelas: <code>{cartelas}</code>
-• Cost: <code>{cost:.2f} ETB</code>
-• New Balance: <code>{new_balance:.2f} ETB</code>
+{get_emoji('stats')} <b>Session Details:</b>
+• Cartelas: <code>{{cartelas}}</code>
+• Cost: <code>{{cost:.2f}} ETB</code>
+• New Balance: <code>{{new_balance:.2f}} ETB</code>
 
-🎯 <b>Win Chance:</b> <code>{win_percentage}%</code>
-⏱️ <b>Round Duration:</b> <code>{round_duration}s</code>
+{get_emoji('target')} <b>Win Chance:</b> <code>{{win_percentage}}%</code>
+{get_emoji('clock')} <b>Round Duration:</b> <code>{{round_duration}}s</code>
 
-🍀 <b>Good luck! May the numbers be with you!</b>
+{get_emoji('four_leaf_clover')} <b>Good luck! May the numbers be with you!</b>
 """
     
-    GAME_WIN = """
-🎉 <b>CONGRATULATIONS! YOU WON!</b> 🎉
+    GAME_WIN = f"""
+{get_emoji('win')} <b>CONGRATULATIONS! YOU WON!</b> {get_emoji('win')}
 
-💰 <b>Winnings:</b> <code>+{amount:.2f} ETB</code>
-📊 <b>New Balance:</b> <code>{new_balance:.2f} ETB</code>
-🏆 <b>Total Wins:</b> <code>{total_wins}</code>
-⭐ <b>Win Rate:</b> <code>{win_rate:.1f}%</code>
+{get_emoji('money')} <b>Winnings:</b> <code>+{{amount:.2f}} ETB</code>
+{get_emoji('balance')} <b>New Balance:</b> <code>{{new_balance:.2f}} ETB</code>
+{get_emoji('trophy')} <b>Total Wins:</b> <code>{{total_wins}}</code>
+{get_emoji('star')} <b>Win Rate:</b> <code>{{win_rate:.1f}}%</code>
 
-🎯 <b>Pattern:</b> {pattern}
-🎫 <b>Cartela:</b> {cartela_id}
+{get_emoji('target')} <b>Pattern:</b> {{pattern}}
+{get_emoji('cartela')} <b>Cartela:</b> {{cartela_id}}
 
-🔄 <b>Play again?</b> Use /play
+{get_emoji('refresh')} <b>Play again?</b> Use /play
 """
     
-    GAME_LOSS = """
-😢 <b>Better Luck Next Time!</b>
+    GAME_LOSS = f"""
+{get_emoji('lose')} <b>Better Luck Next Time!</b>
 
-📊 <b>Round Stats:</b>
-• Numbers Drawn: <code>{numbers_drawn}</code>
-• Closest Pattern: <code>{closest_pattern}</code>
+{get_emoji('stats')} <b>Round Stats:</b>
+• Numbers Drawn: <code>{{numbers_drawn}}</code>
+• Closest Pattern: <code>{{closest_pattern}}</code>
 
-💰 <b>Current Balance:</b> <code>{balance:.2f} ETB</code>
-🎯 <b>Win Rate:</b> <code>{win_rate:.1f}%</code>
+{get_emoji('money')} <b>Current Balance:</b> <code>{{balance:.2f}} ETB</code>
+{get_emoji('star')} <b>Win Rate:</b> <code>{{win_rate:.1f}}%</code>
 
-💪 <b>Don't give up!</b> Your win is coming!
-🔄 <b>Play again:</b> /play
+{get_emoji('muscle')} <b>Don't give up!</b> Your win is coming!
+{get_emoji('refresh')} <b>Play again:</b> /play
 """
     
-    STATS = """
-📊 <b>YOUR BINGO STATISTICS</b>
+    STATS = f"""
+{get_emoji('stats')} <b>YOUR BINGO STATISTICS</b>
 
-🎮 <b>Games:</b>
-• Played: <code>{games_played}</code>
-• Won: <code>{games_won}</code>
-• Win Rate: <code>{win_rate:.1f}%</code>
+{get_emoji('game')} <b>Games:</b>
+• Played: <code>{{games_played}}</code>
+• Won: <code>{{games_won}}</code>
+• Win Rate: <code>{{win_rate:.1f}}%</code>
 
-💰 <b>Financial:</b>
-• Total Bet: <code>{total_bet:.2f} ETB</code>
-• Total Win: <code>{total_win:.2f} ETB</code>
-• Net Profit: <code>{net_profit:+.2f} ETB</code>
-• Best Win: <code>{best_win:.2f} ETB</code>
+{get_emoji('money')} <b>Financial:</b>
+• Total Bet: <code>{{total_bet:.2f}} ETB</code>
+• Total Win: <code>{{total_win:.2f}} ETB</code>
+• Net Profit: <code>{{net_profit:+.2f}} ETB</code>
+• Best Win: <code>{{best_win:.2f}} ETB</code>
 
-⏰ <b>Last Played:</b> {last_played}
+{get_emoji('clock')} <b>Last Played:</b> {{last_played}}
 
-🏆 <b>Rank:</b> #{rank}
+{get_emoji('trophy')} <b>Rank:</b> #{{rank}}
 """
     
-    LEADERBOARD = """
-🏆 <b>BINGO LEADERBOARD</b> 🏆
+    LEADERBOARD = f"""
+{get_emoji('trophy')} <b>BINGO LEADERBOARD</b> {get_emoji('trophy')}
 
-{entries}
+{{entries}}
 
-📅 <b>Updated:</b> {timestamp}
-🎯 <b>Win to climb the ranks!</b>
+{get_emoji('calendar')} <b>Updated:</b> {{timestamp}}
+{get_emoji('target')} <b>Win to climb the ranks!</b>
 """
     
-    QUICK_PLAY = """
-⚡ <b>QUICK PLAY</b> ⚡
+    QUICK_PLAY = f"""
+{get_emoji('lightning')} <b>QUICK PLAY</b> {get_emoji('lightning')}
 
-💰 <b>Balance:</b> {balance:.2f} ETB
+{get_emoji('money')} <b>Balance:</b> {{balance:.2f}} ETB
 
 <b>Choose cartelas:</b>
-• 1 Cartela: {price1} ETB
-• 2 Cartelas: {price2} ETB
-• 3 Cartelas: {price3} ETB
-• 4 Cartelas: {price4} ETB
+• 1 Cartela: {{price1}} ETB
+• 2 Cartelas: {{price2}} ETB
+• 3 Cartelas: {{price3}} ETB
+• 4 Cartelas: {{price4}} ETB
 
-🎯 <b>Auto-play available!</b> Set and forget!
+{get_emoji('target')} <b>Auto-play available!</b> Set and forget!
 """
 
 # ==================== GAME SESSION MANAGER ====================
@@ -270,7 +271,7 @@ class GameSessionManager:
                 balance=balance,
                 auth_code=auth_code,
                 created_at=time.time(),
-                expires_at=time.time() + 300  # 5 minutes
+                expires_at=time.time() + 300
             )
             self._sessions[telegram_id] = session
             return session
@@ -300,7 +301,6 @@ class GameSessionManager:
                 del self._sessions[telegram_id]
     
     def get_active_count(self) -> int:
-        """Get number of active sessions"""
         return len(self._sessions)
 
 # Global session manager
@@ -313,14 +313,11 @@ class StatsManager:
     @staticmethod
     @lru_cache(maxsize=1000)
     async def get_player_stats(telegram_id: int) -> GameStats:
-        """Get cached player statistics"""
         try:
-            # Get from database
             user = await database.get_user(telegram_id)
             if not user:
                 return GameStats()
             
-            # Get transaction stats
             async with database._pool.acquire() as conn:
                 stats = await conn.fetchrow("""
                     SELECT 
@@ -348,7 +345,6 @@ class StatsManager:
     
     @staticmethod
     async def get_leaderboard(limit: int = 10) -> list:
-        """Get top players leaderboard"""
         cache_key = f"leaderboard_{limit}"
         cached = game_cache.get(cache_key)
         if cached:
@@ -390,7 +386,6 @@ class StatsManager:
     
     @staticmethod
     async def get_active_players_count() -> int:
-        """Get count of active players (last 24h)"""
         cache_key = "active_players_count"
         cached = game_cache.get(cache_key)
         if cached:
@@ -411,7 +406,6 @@ class StatsManager:
 
 # ==================== MAIN HANDLER ====================
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ultra-optimized /play command handler"""
     user: User = update.effective_user
     telegram_id = user.id
     username = user.username or user.first_name
@@ -419,7 +413,6 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
     
     try:
-        # Parallel data fetching
         user_data_task = database.get_user(telegram_id)
         balance_task = database.get_balance(telegram_id)
         win_percentage_task = database.get_win_percentage()
@@ -429,7 +422,6 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data_task, balance_task, win_percentage_task, active_players_task
         )
         
-        # Validate user
         if not user_data or not user_data.get('registered'):
             await update.message.reply_text(
                 "❌ Please register first using /register",
@@ -437,7 +429,6 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Check balance
         min_needed = Config.MIN_BALANCE_FOR_PLAY
         if balance < min_needed:
             await update.message.reply_text(
@@ -449,35 +440,29 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Generate auth code
         auth_code = await database.create_auth_code(telegram_id)
-        
-        # Create game session
         await session_manager.create_session(telegram_id, username, balance, auth_code)
         
-        # Build web app URL
         web_app_url = f"{Config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&v={int(time.time())}"
         
-        # Create quick play buttons
         keyboard = [
             [InlineKeyboardButton(
-                "🎮 PLAY BINGO NOW 🎮", 
+                f"{get_emoji('game')} PLAY BINGO NOW {get_emoji('game')}", 
                 web_app=WebAppInfo(url=web_app_url)
             )],
             [
-                InlineKeyboardButton("⚡ 1 Cartela", callback_data="quick_play_1"),
-                InlineKeyboardButton("⚡ 2 Cartelas", callback_data="quick_play_2"),
-                InlineKeyboardButton("⚡ 3 Cartelas", callback_data="quick_play_3"),
-                InlineKeyboardButton("⚡ 4 Cartelas", callback_data="quick_play_4")
+                InlineKeyboardButton(f"{get_emoji('lightning')} 1 Cartela", callback_data="quick_play_1"),
+                InlineKeyboardButton(f"{get_emoji('lightning')} 2 Cartelas", callback_data="quick_play_2"),
+                InlineKeyboardButton(f"{get_emoji('lightning')} 3 Cartelas", callback_data="quick_play_3"),
+                InlineKeyboardButton(f"{get_emoji('lightning')} 4 Cartelas", callback_data="quick_play_4")
             ],
             [
-                InlineKeyboardButton("📊 My Stats", callback_data="game_stats"),
-                InlineKeyboardButton("🏆 Leaderboard", callback_data="game_leaderboard")
+                InlineKeyboardButton(f"{get_emoji('stats')} My Stats", callback_data="game_stats"),
+                InlineKeyboardButton(f"{get_emoji('trophy')} Leaderboard", callback_data="game_leaderboard")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Send welcome message
         response_time = (time.time() - start_time) * 1000
         logger.info(f"Play command for {telegram_id} in {response_time:.2f}ms")
         
@@ -496,13 +481,12 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Play command error for {telegram_id}: {e}")
         await update.message.reply_text(
-            "⚠️ An error occurred. Please try again later.",
+            f"{get_emoji('error')} An error occurred. Please try again later.",
             parse_mode=ParseMode.HTML
         )
 
 # ==================== GAME CALLBACK HANDLER ====================
 async def game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle web app game data with ultra-fast processing"""
     user: User = update.effective_user
     telegram_id = user.id
     
@@ -514,7 +498,6 @@ async def game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         game_data = json.loads(data.data)
         action = game_data.get('action')
         
-        # Route to appropriate handler
         if action == 'game_start':
             await handle_game_start(update, game_data, telegram_id)
         elif action == 'game_result':
@@ -531,15 +514,12 @@ async def game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== ACTION HANDLERS ====================
 async def handle_game_start(update: Update, game_data: Dict, telegram_id: int):
-    """Handle game start event"""
     cartelas = game_data.get('cartelas', 1)
     cost = cartelas * Config.CARTELA_PRICE
     
-    # Get current balance
     balance = await database.get_balance(telegram_id)
     win_percentage = await database.get_win_percentage()
     
-    # Update session
     await session_manager.update_session(
         telegram_id,
         cartelas_purchased=cartelas,
@@ -558,7 +538,6 @@ async def handle_game_start(update: Update, game_data: Dict, telegram_id: int):
     )
 
 async def handle_game_result(update: Update, game_data: Dict, telegram_id: int):
-    """Handle game result with statistics update"""
     won = game_data.get('won', False)
     amount = float(game_data.get('amount', 0))
     pattern = game_data.get('pattern', 'Unknown')
@@ -566,18 +545,11 @@ async def handle_game_result(update: Update, game_data: Dict, telegram_id: int):
     numbers_drawn = game_data.get('numbers_drawn', 0)
     closest_pattern = game_data.get('closest_pattern', 'None')
     
-    # Get fresh balance
     new_balance = await database.get_balance(telegram_id)
     stats = await StatsManager.get_player_stats(telegram_id)
     
     if won and amount > 0:
-        # Update session
-        await session_manager.update_session(
-            telegram_id,
-            total_won=amount
-        )
-        
-        # Clear leaderboard cache
+        await session_manager.update_session(telegram_id, total_won=amount)
         game_cache.clear()
         
         await update.message.reply_text(
@@ -603,62 +575,57 @@ async def handle_game_result(update: Update, game_data: Dict, telegram_id: int):
         )
 
 async def handle_game_end(update: Update, telegram_id: int):
-    """Handle game end event"""
     session = await session_manager.get_session(telegram_id)
     if session:
         net_result = session.total_won - session.total_spent
         await update.message.reply_text(
-            f"📊 <b>Session Summary</b>\n\n"
-            f"• Cartelas: {session.cartelas_purchased}\n"
-            f"• Spent: {session.total_spent:.2f} ETB\n"
-            f"• Won: {session.total_won:.2f} ETB\n"
-            f"• Net: <code>{net_result:+.2f} ETB</code>\n\n"
-            f"🔄 Play again with /play",
+            f"{get_emoji('stats')} <b>Session Summary</b>\n\n"
+            f"• {get_emoji('cartela')} Cartelas: {session.cartelas_purchased}\n"
+            f"• {get_emoji('money')} Spent: {session.total_spent:.2f} ETB\n"
+            f"• {get_emoji('win')} Won: {session.total_won:.2f} ETB\n"
+            f"• {get_emoji('balance')} Net: <code>{net_result:+.2f} ETB</code>\n\n"
+            f"{get_emoji('refresh')} Play again with /play",
             parse_mode=ParseMode.HTML
         )
         await session_manager.end_session(telegram_id)
 
 async def handle_game_error(update: Update, game_data: Dict, telegram_id: int):
-    """Handle game errors gracefully"""
     error_msg = game_data.get('error', 'Unknown error')
     logger.error(f"Game error for {telegram_id}: {error_msg}")
     await update.message.reply_text(
-        f"⚠️ <b>Game Error</b>\n\n{error_msg}\n\nPlease try again with /play",
+        f"{get_emoji('error')} <b>Game Error</b>\n\n{error_msg}\n\nPlease try again with /play",
         parse_mode=ParseMode.HTML
     )
 
 # ==================== QUICK PLAY HANDLERS ====================
 async def quick_play_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle quick play button callbacks"""
     query = update.callback_query
     await query.answer()
     
     cartelas = int(query.data.split('_')[-1])
     telegram_id = query.from_user.id
     
-    # Generate auth code and launch game
     auth_code = await database.create_auth_code(telegram_id)
     web_app_url = f"{Config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}&cartelas={cartelas}&quick=true"
     
     keyboard = [[
         InlineKeyboardButton(
-            f"🎮 PLAY {cartelas} CARTELA{'S' if cartelas > 1 else ''} 🎮",
+            f"{get_emoji('game')} PLAY {cartelas} CARTELA{'S' if cartelas > 1 else ''} {get_emoji('game')}",
             web_app=WebAppInfo(url=web_app_url)
         )
     ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"⚡ <b>Quick Play - {cartelas} Cartela{'s' if cartelas > 1 else ''}</b>\n\n"
-        f"💰 Cost: {cartelas * Config.CARTELA_PRICE} ETB\n"
-        f"🎯 Win Chance: {await database.get_win_percentage()}%\n\n"
+        f"{get_emoji('lightning')} <b>Quick Play - {cartelas} Cartela{'s' if cartelas > 1 else ''}</b>\n\n"
+        f"{get_emoji('money')} Cost: {cartelas * Config.CARTELA_PRICE} ETB\n"
+        f"{get_emoji('target')} Win Chance: {await database.get_win_percentage()}%\n\n"
         f"Click below to start!",
         reply_markup=reply_markup,
         parse_mode=ParseMode.HTML
     )
 
 async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle stats button callback"""
     query = update.callback_query
     await query.answer()
     
@@ -666,7 +633,6 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await StatsManager.get_player_stats(telegram_id)
     leaderboard = await StatsManager.get_leaderboard(50)
     
-    # Find rank
     rank = next((i + 1 for i, p in enumerate(leaderboard) if p['telegram_id'] == telegram_id), None)
     
     await query.edit_message_text(
@@ -683,19 +649,18 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔙 Back to Game", callback_data="back_to_game")
+            InlineKeyboardButton(f"{get_emoji('back')} Back to Game", callback_data="back_to_game")
         ]])
     )
 
 async def leaderboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle leaderboard button callback"""
     query = update.callback_query
     await query.answer()
     
     leaderboard = await StatsManager.get_leaderboard(10)
     
     if not leaderboard:
-        entries = "🏆 <i>No players yet. Be the first!</i>"
+        entries = f"{get_emoji('trophy')} <i>No players yet. Be the first!</i>"
     else:
         entries = "\n".join([
             f"{'🥇' if p['rank'] == 1 else '🥈' if p['rank'] == 2 else '🥉' if p['rank'] == 3 else f'{p["rank"]}️⃣'} "
@@ -710,23 +675,21 @@ async def leaderboard_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         ),
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔄 Refresh", callback_data="game_leaderboard"),
-            InlineKeyboardButton("🔙 Back", callback_data="back_to_game")
+            InlineKeyboardButton(f"{get_emoji('refresh')} Refresh", callback_data="game_leaderboard"),
+            InlineKeyboardButton(f"{get_emoji('back')} Back", callback_data="back_to_game")
         ]])
     )
 
 async def back_to_game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle back to game button"""
     query = update.callback_query
     await query.answer()
-    
     await play_command(update, context)
 
 # ==================== SESSION CLEANUP ====================
 async def start_game_handlers():
     """Start background tasks for game handlers"""
     await session_manager.start()
-    logger.info("🎮 Game handlers initialized")
+    logger.info(f"{get_emoji('game')} Game handlers initialized")
 
 # Export handlers
 __all__ = [
