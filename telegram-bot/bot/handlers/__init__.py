@@ -3,7 +3,7 @@
 
 # ==================== CORE HANDLERS ====================
 from .start import start, language_callback
-from .register import register, handle_contact
+from .register import register, register_phone, register_cancel, play, PHONE
 from .balance import balance
 from .invite import invite
 from .contact import contact_center
