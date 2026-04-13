@@ -1,7 +1,7 @@
 # telegram-bot/bot/texts/game_texts.py
 # Estif Bingo 24/7 - Game-Specific Texts
 
-from . import EMOJIS
+from .emojis import EMOJIS
 
 # ==================== GAME TEXTS ====================
 GAME_TEXTS = {

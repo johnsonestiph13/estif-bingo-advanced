@@ -14,6 +14,7 @@ from .game_texts import (
     ADMIN_MESSAGES,
     TRANSFER_MESSAGES
 )
+from .emojis import EMOJIS
 
 # ==================== EMOJI MAPPINGS ====================
 EMOJIS = {
