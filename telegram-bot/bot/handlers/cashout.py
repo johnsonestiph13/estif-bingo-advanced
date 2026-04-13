@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 AMOUNT = 1
-ACCOUNT = 2
+METHOD = 2      # ← ADDED: Method selection state
+ACCOUNT = 3     # Account number entry state
 
 
 async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,7 +62,7 @@ async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
-    return AMOUNT
+    return METHOD  # ← Changed to METHOD state
 
 
 async def cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,7 +92,7 @@ async def cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{get_emoji('error')} Invalid withdrawal method selected.",
                 parse_mode='Markdown'
             )
-            return AMOUNT
+            return METHOD
         
         telegram_id = query.from_user.id
         user = await Database.get_user(telegram_id)
@@ -108,7 +109,7 @@ async def cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return AMOUNT
     
-    return AMOUNT
+    return METHOD
 
 
 async def cashout_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -281,5 +282,6 @@ __all__ = [
     'handle_cashout_amount',  # Alias for backward compatibility
     'handle_cashout_account',  # Alias for backward compatibility
     'AMOUNT',
+    'METHOD',   # ← ADDED: For conversation handler
     'ACCOUNT',
 ]
