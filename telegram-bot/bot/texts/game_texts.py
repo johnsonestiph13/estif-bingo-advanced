@@ -48,7 +48,7 @@ GAME_TEXTS = {
         'stats_games': f"🎮 *Games:*\n• Played: `{{played}}`\n• Won: `{{won}}`\n• Win Rate: `{{rate:.1f}}%`\n\n",
         'stats_financial': f"💰 *Financial:*\n• Total Bet: `{{bet:.2f}} ETB`\n• Total Win: `{{win:.2f}} ETB`\n• Net Profit: `{{net:+.2f}} ETB`\n• Best Win: `{{best:.2f}} ETB`\n\n",
         'stats_time': f"⏰ *Last Played:* `{{last_played}}`\n\n",
-        'stats_rank': f"🏆 *Rank:* `#{rank}`",
+        'stats_rank': "🏆 *Rank:* `#{rank}`",
         
         # Leaderboard
         'leaderboard_title': f"{EMOJIS['trophy']} *BINGO LEADERBOARD* {EMOJIS['trophy']}\n\n",
