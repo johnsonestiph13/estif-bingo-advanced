@@ -51,6 +51,11 @@ def main_menu_inline(user):
     return InlineKeyboardMarkup(keyboard)
 
 
+# ==================== ALIAS FOR BACKWARD COMPATIBILITY ====================
+# Some parts of the code may import 'main_menu' instead of 'main_menu_inline'
+main_menu = main_menu_inline  # ← ADD THIS LINE
+
+
 def back_button(target):
     """Create a back button for navigation"""
     return InlineKeyboardMarkup([

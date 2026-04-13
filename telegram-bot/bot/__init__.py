@@ -22,11 +22,17 @@ from bot.db.database import Database, database
 from bot.api.game_api import game_api_bp
 from bot.api.webhooks import webhook_bp
 
-# Keyboard modules
+# Keyboard modules - FIXED: Added main_menu alias
 from bot.keyboards.menu import (
-    menu, main_menu_inline, back_button, confirm_keyboard,
-    deposit_methods_keyboard, cashout_methods_keyboard,
-    language_keyboard, admin_keyboard
+    menu, 
+    main_menu_inline, 
+    main_menu,  # ← ADDED: main_menu alias
+    back_button, 
+    confirm_keyboard,
+    deposit_methods_keyboard, 
+    cashout_methods_keyboard,
+    language_keyboard, 
+    admin_keyboard
 )
 from bot.keyboards.game_keyboards import (
     game_menu_keyboard, quick_play_keyboard, cartela_selection_keyboard,
@@ -104,6 +110,7 @@ def get_handlers():
             'back_to_game_callback': back_to_game_callback,
         }
     return _HANDLERS
+
 
 # ==================== BOT INITIALIZATION ====================
 
@@ -185,6 +192,7 @@ class BotInitializer:
 
 # Global initializer instance
 bot_initializer = BotInitializer()
+
 
 # ==================== CONVENIENCE FUNCTIONS ====================
 
@@ -281,6 +289,7 @@ __all__ = [
     # Keyboards
     'menu',
     'main_menu_inline',
+    'main_menu',  # ← ADDED: Export main_menu alias
     'back_button',
     'confirm_keyboard',
     'deposit_methods_keyboard',
