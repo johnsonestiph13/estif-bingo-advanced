@@ -1,5 +1,5 @@
 # telegram-bot/bot/texts/game_texts.py
-# Estif Bingo 24/7 - Game-Specific Texts (Fixed: No f-strings with undefined variables)
+# Estif Bingo 24/7 - Game-Specific Texts (FULLY FIXED)
 
 from .emojis import get_emoji
 
@@ -48,12 +48,12 @@ GAME_TEXTS = {
                    f"• {_e('balance')} Net: `{{net:+.2f}} ETB`\n\n"
                    f"{_e('refresh')} Play again with /play",
         
-        # Game stats (FIXED: removed f-string for stats_rank)
+        # Game stats (FIXED: Using double braces for rank placeholder)
         'stats_title': f"{_e('stats')} *Your Bingo Statistics*\n\n",
         'stats_games': f"{_e('game')} *Games:*\n• Played: `{{played}}`\n• Won: `{{won}}`\n• Win Rate: `{{rate:.1f}}%`\n\n",
         'stats_financial': f"{_e('money')} *Financial:*\n• Total Bet: `{{bet:.2f}} ETB`\n• Total Win: `{{win:.2f}} ETB`\n• Net Profit: `{{net:+.2f}} ETB`\n• Best Win: `{{best:.2f}} ETB`\n\n",
         'stats_time': f"{_e('clock')} *Last Played:* `{{last_played}}`\n\n",
-        'stats_rank': "{trophy} *Rank:* `#{rank}`".format(trophy=_e('trophy')),  # ← FIXED: No f-string
+        'stats_rank': f"{_e('trophy')} *Rank:* `{{rank}}`",  # ← FIXED: Double braces for placeholder
         
         # Leaderboard
         'leaderboard_title': f"{_e('trophy')} *BINGO LEADERBOARD* {_e('trophy')}\n\n",
