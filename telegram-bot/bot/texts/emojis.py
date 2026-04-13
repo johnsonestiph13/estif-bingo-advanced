@@ -65,4 +65,28 @@ EMOJIS = {
     'email': '📧',
     'link': '🔗',
     'notification': '🔔',
+    
+    # ==================== ADD MISSING EMOJIS ====================
+    # Statistics & Data
+    'stats': '📊',        # ← ADD THIS
+    'statistics': '📈',   # ← ADD THIS
+    'leaderboard': '🏆',  # ← ADD THIS
+    'rank': '🎖️',         # ← ADD THIS
+    
+    # Game specific
+    'selection': '🎯',     # ← ADD THIS
+    'draw': '🎲',          # ← ADD THIS
+    'round': '🔄',         # ← ADD THIS
+    'winner': '🏆',        # ← ADD THIS
+    
+    # Actions
+    'select': '✅',        # ← ADD THIS
+    'deselect': '❌',      # ← ADD THIS
+    'confirm': '✓',        # ← ADD THIS
+    'cancel': '✗',         # ← ADD THIS
+    
+    # Navigation
+    'menu': '📋',          # ← ADD THIS
+    'home': '🏠',          # ← ADD THIS
+    'exit': '🚪',          # ← ADD THIS
 }
