@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 AMOUNT = 1
-METHOD = 2      # ← ADDED: Method selection state
-ACCOUNT = 3     # Account number entry state
+METHOD = 2
+ACCOUNT = 3
 
 
 async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,7 +62,7 @@ async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
-    return METHOD  # ← Changed to METHOD state
+    return METHOD
 
 
 async def cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,21 +267,24 @@ async def cashout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# For backward compatibility with older code that expects these names
+# ==================== BACKWARD COMPATIBILITY ALIASES ====================
+# These allow older code to import the same functions by different names
 handle_cashout_amount = cashout_amount
 handle_cashout_account = cashout_account
+cashout_method = cashout_callback  # ← ADDED: Alias for cashout_callback
 
 
 # Export all
 __all__ = [
     'cashout',
     'cashout_callback',
+    'cashout_method',        # ← ADDED: Alias for backward compatibility
     'cashout_amount',
     'cashout_account',
     'cashout_cancel',
-    'handle_cashout_amount',  # Alias for backward compatibility
-    'handle_cashout_account',  # Alias for backward compatibility
+    'handle_cashout_amount',
+    'handle_cashout_account',
     'AMOUNT',
-    'METHOD',   # ← ADDED: For conversation handler
+    'METHOD',
     'ACCOUNT',
 ]
