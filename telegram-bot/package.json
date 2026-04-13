@@ -1,0 +1,37 @@
+{
+  "name": "estif-bingo-telegram-bot",
+  "version": "3.0.0",
+  "description": "Estif Bingo 24/7 - Telegram Bot for Bingo Game Management",
+  "main": "run.py",
+  "scripts": {
+    "start": "python run.py",
+    "dev": "python run.py",
+    "test": "pytest",
+    "lint": "flake8 bot/",
+    "format": "black bot/",
+    "type-check": "mypy bot/"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "bingo",
+    "game",
+    "python",
+    "flask",
+    "asyncpg"
+  ],
+  "author": "Estifanos Yhannis",
+  "license": "MIT",
+  "engines": {
+    "python": ">=3.11.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.1.1"
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "printWidth": 100,
+    "tabWidth": 2
+  }
+}

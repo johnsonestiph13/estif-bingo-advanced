@@ -1,4 +1,6 @@
 # telegram-bot/bot/db/database.py
+# Estif Bingo 24/7 - Complete Database Module
+
 import asyncpg
 import logging
 from datetime import datetime, timedelta
@@ -28,6 +30,7 @@ class Database:
 
     @classmethod
     async def init_pool(cls):
+        """Initialize database connection pool with SSL for Render"""
         ssl_config = "require" if os.getenv("NODE_ENV") == "production" else None
         
         cls._pool = await asyncpg.create_pool(
@@ -45,6 +48,7 @@ class Database:
 
     @classmethod
     async def _ensure_columns(cls):
+        """Ensure all required columns exist in users table"""
         async with cls._pool.acquire() as conn:
             columns = await conn.fetch("""
                 SELECT column_name 
@@ -72,13 +76,16 @@ class Database:
 
     @classmethod
     async def close_pool(cls):
+        """Close database connection pool"""
         if cls._pool:
             await cls._pool.close()
             logger.info("Database pool closed")
 
     @classmethod
     async def _init_tables(cls):
+        """Create all necessary tables if they don't exist"""
         async with cls._pool.acquire() as conn:
+            # Users table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id BIGINT PRIMARY KEY,
@@ -96,6 +103,7 @@ class Database:
                 )
             """)
             
+            # Game rounds table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS game_rounds (
                     round_id SERIAL PRIMARY KEY,
@@ -112,6 +120,7 @@ class Database:
                 )
             """)
             
+            # Game transactions table (cartela as VARCHAR)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS game_transactions (
                     id SERIAL PRIMARY KEY,
@@ -126,6 +135,7 @@ class Database:
                 )
             """)
             
+            # Game settings table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS game_settings (
                     key VARCHAR(50) PRIMARY KEY,
@@ -135,9 +145,58 @@ class Database:
                 )
             """)
             
+            # Pending withdrawals table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS pending_withdrawals (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    amount DECIMAL(12,2),
+                    account TEXT,
+                    method TEXT,
+                    status TEXT DEFAULT 'pending',
+                    requested_at TIMESTAMP DEFAULT NOW(),
+                    processed_at TIMESTAMP,
+                    note TEXT
+                )
+            """)
+            
+            # OTP codes table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS otp_codes (
+                    telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    otp TEXT,
+                    expires_at TIMESTAMP,
+                    attempts INTEGER DEFAULT 0
+                )
+            """)
+            
+            # Auth codes table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS auth_codes (
+                    code TEXT PRIMARY KEY,
+                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    expires_at TIMESTAMP,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Commission logs table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS commission_logs (
+                    id SERIAL PRIMARY KEY,
+                    old_percentage INTEGER NOT NULL,
+                    new_percentage INTEGER NOT NULL,
+                    changed_by VARCHAR(100),
+                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Insert default game settings
             await conn.execute("""
                 INSERT INTO game_settings (key, value, description) VALUES 
                     ('win_percentage', '80', 'Current game win percentage (70,75,76,80)'),
+                    ('default_sound_pack', 'pack1', 'Default sound pack for new players'),
                     ('selection_time', '50', 'Cartela selection time in seconds'),
                     ('draw_interval', '4000', 'Number draw interval in milliseconds'),
                     ('next_round_delay', '6000', 'Delay between rounds in milliseconds'),
@@ -147,8 +206,10 @@ class Database:
                 ON CONFLICT (key) DO NOTHING
             """)
             
+            # Create indexes
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_expires ON otp_codes(expires_at)")
@@ -156,11 +217,13 @@ class Database:
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp ON game_transactions(timestamp DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_commission_logs_changed_at ON commission_logs(changed_at DESC)")
             
         logger.info("✅ Database tables ready")
 
     @classmethod
     async def _run_migrations(cls):
+        """Run pending migrations"""
         async with cls._pool.acquire() as conn:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS migrations (
@@ -172,25 +235,49 @@ class Database:
             
             executed = await conn.fetch("SELECT name FROM migrations")
             executed_set = {row["name"] for row in executed}
+            
+            # Add migration for commission_logs if not exists
+            if "002_commission_logs" not in executed_set:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS commission_logs (
+                        id SERIAL PRIMARY KEY,
+                        old_percentage INTEGER NOT NULL,
+                        new_percentage INTEGER NOT NULL,
+                        changed_by VARCHAR(100),
+                        changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                await conn.execute("INSERT INTO migrations (name) VALUES ('002_commission_logs')")
+                logger.info("✅ Migration 002_commission_logs applied")
 
     # ==================== USER OPERATIONS ====================
     
     @classmethod
     async def get_user(cls, telegram_id: int) -> Optional[Dict]:
+        """Get user by Telegram ID"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
             return dict(row) if row else None
 
     @classmethod
     async def get_user_by_phone(cls, phone: str) -> Optional[Dict]:
+        """Get user by phone number"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE phone = $1", phone)
+            return dict(row) if row else None
+
+    @classmethod
+    async def get_user_by_username(cls, username: str) -> Optional[Dict]:
+        """Get user by username"""
+        async with cls._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM users WHERE username ILIKE $1", username)
             return dict(row) if row else None
 
     @classmethod
     async def create_user(cls, telegram_id: int, username: str, 
                           first_name: str, last_name: str, 
                           phone: str, lang: str = "en") -> None:
+        """Create a new user"""
         async with cls._pool.acquire() as conn:
             referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
             await conn.execute("""
@@ -201,6 +288,7 @@ class Database:
 
     @classmethod
     async def update_user(cls, telegram_id: int, **kwargs) -> None:
+        """Update user fields"""
         if not kwargs:
             return
         set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(kwargs.keys())])
@@ -210,6 +298,7 @@ class Database:
 
     @classmethod
     async def update_last_seen(cls, telegram_id: int) -> None:
+        """Update user's last seen timestamp"""
         async with cls._pool.acquire() as conn:
             await conn.execute("UPDATE users SET last_seen = NOW() WHERE telegram_id = $1", telegram_id)
 
@@ -218,6 +307,7 @@ class Database:
     @classmethod
     async def update_balance(cls, telegram_id: int, amount: float, 
                               transaction_type: str, round_id: int = None) -> bool:
+        """Update user balance with transaction record"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 user = await conn.fetchrow("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", telegram_id)
@@ -236,6 +326,7 @@ class Database:
 
     @classmethod
     async def add_balance(cls, telegram_id: int, amount: float, reason: str = None) -> float:
+        """Add balance to user"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 user = await conn.fetchrow("SELECT balance, total_deposited FROM users WHERE telegram_id = $1 FOR UPDATE", telegram_id)
@@ -248,10 +339,14 @@ class Database:
                 if amount > 0 and reason not in ("win", "refund", "deselect", "withdrawal_refund"):
                     new_total = current_total_deposited + amount
                     await conn.execute("UPDATE users SET total_deposited = $1 WHERE telegram_id = $2", new_total, telegram_id)
+                # Update total_won if this is a win
+                if reason == "win" and amount > 0:
+                    await conn.execute("UPDATE users SET total_won = total_won + $1 WHERE telegram_id = $2", amount, telegram_id)
                 return new_balance
 
     @classmethod
     async def deduct_balance(cls, telegram_id: int, amount: float, reason: str = None) -> float:
+        """Deduct balance from user"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 user = await conn.fetchrow("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", telegram_id)
@@ -262,10 +357,17 @@ class Database:
                     raise ValueError(f"Insufficient balance: {current_balance} < {amount}")
                 new_balance = current_balance - amount
                 await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2", new_balance, telegram_id)
+                # Update games_played if this is a cartela purchase
+                if reason == "cartela_purchase":
+                    await conn.execute("UPDATE users SET games_played = games_played + 1 WHERE telegram_id = $1", telegram_id)
+                # Update total_withdrawn if this is a cashout
+                if reason == "cashout":
+                    await conn.execute("UPDATE users SET total_withdrawn = total_withdrawn + $1 WHERE telegram_id = $2", amount, telegram_id)
                 return new_balance
 
     @classmethod
     async def get_balance(cls, telegram_id: int) -> float:
+        """Get user's current balance"""
         user = await cls.get_user(telegram_id)
         if user and user["balance"]:
             return float(user["balance"])
@@ -275,6 +377,7 @@ class Database:
     
     @classmethod
     async def create_auth_code(cls, telegram_id: int) -> str:
+        """Create one-time authentication code for game access"""
         import secrets
         code = secrets.token_urlsafe(16)
         expires_at = datetime.utcnow() + timedelta(minutes=5)
@@ -287,6 +390,7 @@ class Database:
 
     @classmethod
     async def verify_auth_code(cls, code: str) -> Optional[int]:
+        """Verify auth code and return telegram_id if valid"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT telegram_id FROM auth_codes WHERE code = $1 AND expires_at > NOW() AND used = FALSE",
@@ -299,12 +403,14 @@ class Database:
 
     @classmethod
     async def consume_auth_code(cls, code: str) -> Optional[int]:
+        """Consume auth code and return telegram_id if valid"""
         return await cls.verify_auth_code(code)
 
     # ==================== OTP OPERATIONS ====================
     
     @classmethod
     async def store_otp(cls, telegram_id: int, otp: str) -> None:
+        """Store OTP code for user"""
         expires_at = datetime.utcnow() + timedelta(minutes=5)
         async with cls._pool.acquire() as conn:
             await conn.execute("""
@@ -316,6 +422,7 @@ class Database:
 
     @classmethod
     async def verify_otp(cls, telegram_id: int, otp: str) -> bool:
+        """Verify OTP code (one-time use)"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT otp, expires_at, attempts FROM otp_codes WHERE telegram_id = $1", telegram_id)
             if not row or row["expires_at"] < datetime.utcnow() or row["otp"] != otp:
@@ -330,6 +437,7 @@ class Database:
     @classmethod
     async def add_pending_withdrawal(cls, telegram_id: int, amount: float,
                                       account: str, method: str) -> int:
+        """Add pending withdrawal request"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO pending_withdrawals (telegram_id, amount, account, method)
@@ -340,6 +448,7 @@ class Database:
 
     @classmethod
     async def get_pending_withdrawals(cls, telegram_id: int = None) -> List[Dict]:
+        """Get pending withdrawal requests"""
         async with cls._pool.acquire() as conn:
             if telegram_id:
                 rows = await conn.fetch(
@@ -354,12 +463,14 @@ class Database:
 
     @classmethod
     async def get_withdrawal_by_id(cls, withdrawal_id: int) -> Optional[Dict]:
+        """Get withdrawal by ID"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM pending_withdrawals WHERE id = $1", withdrawal_id)
             return dict(row) if row else None
 
     @classmethod
     async def approve_withdrawal(cls, withdrawal_id: int) -> Optional[Tuple[int, float]]:
+        """Approve withdrawal and deduct balance"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
                 withdrawal = await conn.fetchrow(
@@ -386,6 +497,7 @@ class Database:
 
     @classmethod
     async def reject_withdrawal(cls, withdrawal_id: int) -> None:
+        """Reject withdrawal request"""
         async with cls._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE pending_withdrawals SET status = 'rejected', processed_at = NOW() WHERE id = $1",
@@ -396,12 +508,14 @@ class Database:
     
     @classmethod
     async def get_setting(cls, key: str) -> Optional[str]:
+        """Get setting value by key"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT value FROM game_settings WHERE key = $1", key)
             return row["value"] if row else None
 
     @classmethod
     async def set_setting(cls, key: str, value: str) -> None:
+        """Set setting value"""
         async with cls._pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO game_settings (key, value, updated_at) VALUES ($1, $2, NOW())
@@ -410,20 +524,73 @@ class Database:
 
     @classmethod
     async def get_win_percentage(cls) -> int:
+        """Get current win percentage"""
         value = await cls.get_setting('win_percentage')
         return int(value) if value else 80
 
     @classmethod
     async def set_win_percentage(cls, percentage: int) -> None:
+        """Set win percentage"""
         await cls.set_setting('win_percentage', str(percentage))
+
+    @classmethod
+    async def get_default_sound_pack(cls) -> str:
+        """Get default sound pack for new players"""
+        value = await cls.get_setting('default_sound_pack')
+        return value if value else 'pack1'
+
+    @classmethod
+    async def set_default_sound_pack(cls, sound_pack: str) -> None:
+        """Set default sound pack for new players"""
+        await cls.set_setting('default_sound_pack', sound_pack)
+
+    # ==================== COMMISSION LOGS ====================
+    
+    @classmethod
+    async def log_commission_change(cls, old_percentage: int, new_percentage: int, changed_by: str = "API") -> None:
+        """Log commission change to database"""
+        async with cls._pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO commission_logs (old_percentage, new_percentage, changed_by, changed_at)
+                VALUES ($1, $2, $3, NOW())
+            """, old_percentage, new_percentage, changed_by)
+
+    @classmethod
+    async def get_commission_history(cls, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Get commission change history"""
+        async with cls._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, old_percentage, new_percentage, changed_by, changed_at
+                FROM commission_logs
+                ORDER BY changed_at DESC
+                LIMIT $1 OFFSET $2
+            """, limit, offset)
+            return [dict(r) for r in rows]
+
+    @classmethod
+    async def get_commission_stats(cls) -> Dict:
+        """Get commission statistics"""
+        async with cls._pool.acquire() as conn:
+            total_commission = await conn.fetchval("SELECT COALESCE(SUM(admin_commission), 0) FROM game_rounds")
+            avg_win_percentage = await conn.fetchval("SELECT COALESCE(AVG(win_percentage), 0) FROM game_rounds")
+            changes_count = await conn.fetchval("SELECT COUNT(*) FROM commission_logs")
+            last_change = await conn.fetchval("SELECT MAX(changed_at) FROM commission_logs")
+            
+            return {
+                "total_commission": float(total_commission) if total_commission else 0,
+                "average_win_percentage": float(avg_win_percentage) if avg_win_percentage else 0,
+                "changes_count": changes_count or 0,
+                "last_change": last_change.isoformat() if last_change else None
+            }
 
     # ==================== SEARCH OPERATIONS ====================
     
     @classmethod
     async def search_players(cls, search_term: str) -> List[Dict]:
+        """Search players by username or phone"""
         async with cls._pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT telegram_id, username, phone, balance, total_deposited
+                SELECT telegram_id, username, phone, balance, total_deposited, total_won, games_played, games_won
                 FROM users 
                 WHERE username ILIKE $1 OR phone ILIKE $1
                 ORDER BY balance DESC
@@ -438,6 +605,7 @@ class Database:
                                     transaction_type: str, amount: float,
                                     cartela: str = None, round_num: int = None,
                                     note: str = None) -> int:
+        """Log a game transaction"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO game_transactions (telegram_id, username, type, amount, cartela, round, note)
@@ -447,34 +615,51 @@ class Database:
             return row["id"] if row else 0
 
     @classmethod
-    async def get_user_transactions(cls, telegram_id: int, limit: int = 50) -> List[Dict]:
+    async def get_user_transactions(cls, telegram_id: int, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Get user's transaction history"""
         async with cls._pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT * FROM game_transactions 
                 WHERE telegram_id = $1 
                 ORDER BY timestamp DESC 
-                LIMIT $2
-            """, telegram_id, limit)
+                LIMIT $2 OFFSET $3
+            """, telegram_id, limit, offset)
             return [dict(r) for r in rows]
 
     # ==================== STATISTICS ====================
     
     @classmethod
     async def get_total_users_count(cls) -> int:
+        """Get total registered users count"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT COUNT(*) FROM users WHERE registered = TRUE")
             return row[0] if row else 0
 
     @classmethod
     async def get_total_deposits(cls) -> float:
+        """Get total deposits across all users"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT COALESCE(SUM(total_deposited), 0) FROM users")
             return float(row[0]) if row and row[0] else 0.0
+
+    @classmethod
+    async def get_top_winners(cls, limit: int = 10) -> List[Dict]:
+        """Get top winners leaderboard"""
+        async with cls._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT telegram_id, username, total_won, games_won, games_played
+                FROM users 
+                WHERE registered = TRUE AND total_won > 0
+                ORDER BY total_won DESC
+                LIMIT $1
+            """, limit)
+            return [dict(r) for r in rows]
 
     # ==================== HEALTH CHECK ====================
     
     @classmethod
     async def health_check(cls) -> bool:
+        """Check database connectivity"""
         try:
             async with cls._pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
@@ -484,4 +669,5 @@ class Database:
             return False
 
 
+# Create a global instance for easier imports
 database = Database()

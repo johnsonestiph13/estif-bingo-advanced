@@ -1,0 +1,238 @@
+# telegram-bot/bot/texts/__init__.py
+# Estif Bingo 24/7 - Complete Texts Module Exports
+# Includes: Main texts, Game texts, Error messages, Emoji mappings
+
+from .locales import TEXTS
+
+# ==================== GAME TEXTS (NEW) ====================
+from .game_texts import (
+    GAME_TEXTS,
+    GAME_MESSAGES,
+    ERROR_MESSAGES,
+    SUCCESS_MESSAGES,
+    INFO_MESSAGES,
+    ADMIN_MESSAGES,
+    TRANSFER_MESSAGES
+)
+
+# ==================== EMOJI MAPPINGS ====================
+EMOJIS = {
+    # Game emojis
+    'game': '🎮',
+    'bingo': '🎰',
+    'win': '🎉',
+    'lose': '😢',
+    'jackpot': '💰',
+    'cartela': '🎫',
+    'numbers': '🔢',
+    'dice': '🎲',
+    'trophy': '🏆',
+    'medal': '🥇',
+    'star': '⭐',
+    'lightning': '⚡',
+    'fire': '🔥',
+    'crown': '👑',
+    'gift': '🎁',
+    'bonus': '🎯',
+    
+    # Action emojis
+    'play': '▶️',
+    'pause': '⏸️',
+    'stop': '⏹️',
+    'next': '⏭️',
+    'back': '🔙',
+    'refresh': '🔄',
+    'settings': '⚙️',
+    'help': '❓',
+    'info': 'ℹ️',
+    'warning': '⚠️',
+    'error': '❌',
+    'success': '✅',
+    'question': '❓',
+    'idea': '💡',
+    
+    # Financial emojis
+    'money': '💰',
+    'deposit': '💳',
+    'withdraw': '💸',
+    'balance': '📊',
+    'transaction': '📝',
+    'bank': '🏦',
+    'phone': '📱',
+    'transfer': '🔄',
+    
+    # Status emojis
+    'pending': '⏳',
+    'approved': '✅',
+    'rejected': '❌',
+    'active': '🟢',
+    'inactive': '🔴',
+    'loading': '🔄',
+    
+    # Time emojis
+    'clock': '⏰',
+    'calendar': '📅',
+    'hourglass': '⌛',
+    
+    # Communication emojis
+    'chat': '💬',
+    'support': '📞',
+    'email': '📧',
+    'link': '🔗',
+    'notification': '🔔',
+}
+
+# ==================== HELPER FUNCTIONS ====================
+
+def get_text(key: str, lang: str = 'en', **kwargs) -> str:
+    """Get localized text by key with variable substitution"""
+    try:
+        text = TEXTS.get(lang, TEXTS['en']).get(key, TEXTS['en'].get(key, f"Missing text: {key}"))
+        if kwargs:
+            text = text.format(**kwargs)
+        return text
+    except Exception as e:
+        return f"Error loading text: {key}"
+
+
+def get_game_text(key: str, lang: str = 'en', **kwargs) -> str:
+    """Get game-specific localized text"""
+    try:
+        text = GAME_TEXTS.get(lang, GAME_TEXTS['en']).get(key, GAME_TEXTS['en'].get(key, f"Missing game text: {key}"))
+        if kwargs:
+            text = text.format(**kwargs)
+        return text
+    except Exception:
+        return f"Missing game text: {key}"
+
+
+def get_error_message(error_type: str, lang: str = 'en', **kwargs) -> str:
+    """Get localized error message"""
+    try:
+        text = ERROR_MESSAGES.get(lang, ERROR_MESSAGES['en']).get(error_type, ERROR_MESSAGES['en']['default'])
+        if kwargs:
+            text = text.format(**kwargs)
+        return text
+    except Exception:
+        return ERROR_MESSAGES.get('en', {}).get('default', "An error occurred")
+
+
+def get_success_message(success_type: str, lang: str = 'en', **kwargs) -> str:
+    """Get localized success message"""
+    try:
+        text = SUCCESS_MESSAGES.get(lang, SUCCESS_MESSAGES['en']).get(success_type, SUCCESS_MESSAGES['en']['default'])
+        if kwargs:
+            text = text.format(**kwargs)
+        return text
+    except Exception:
+        return SUCCESS_MESSAGES.get('en', {}).get('default', "Operation successful")
+
+
+def format_with_emoji(text: str, emoji_key: str = None) -> str:
+    """Format text with emoji prefix"""
+    if emoji_key and emoji_key in EMOJIS:
+        return f"{EMOJIS[emoji_key]} {text}"
+    return text
+
+
+def get_supported_languages() -> list:
+    """Get list of supported languages"""
+    return ['en', 'am']
+
+
+def get_language_name(lang: str) -> str:
+    """Get language display name"""
+    languages = {
+        'en': 'English 🇬🇧',
+        'am': 'አማርኛ 🇪🇹'
+    }
+    return languages.get(lang, 'English')
+
+
+# ==================== TEXT CONSTANTS ====================
+
+class TextConstants:
+    """Centralized text constants for common messages"""
+    
+    # Common prefixes
+    ERROR_PREFIX = f"{EMOJIS['error']} Error:"
+    WARNING_PREFIX = f"{EMOJIS['warning']} Warning:"
+    SUCCESS_PREFIX = f"{EMOJIS['success']} Success:"
+    INFO_PREFIX = f"{EMOJIS['info']} Info:"
+    
+    # Common buttons
+    BUTTON_BACK = f"{EMOJIS['back']} Back"
+    BUTTON_CANCEL = "❌ Cancel"
+    BUTTON_CONFIRM = f"{EMOJIS['success']} Confirm"
+    BUTTON_REFRESH = f"{EMOJIS['refresh']} Refresh"
+    BUTTON_HELP = f"{EMOJIS['help']} Help"
+    BUTTON_SETTINGS = f"{EMOJIS['settings']} Settings"
+    
+    # Game status
+    GAME_ACTIVE = f"{EMOJIS['active']} Game Active"
+    GAME_PAUSED = f"{EMOJIS['pause']} Game Paused"
+    GAME_ENDED = f"{EMOJIS['stop']} Game Ended"
+    
+    # Financial
+    CURRENCY = "ETB"
+    CURRENCY_SYMBOL = "Br"
+    
+    # Time formats
+    TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+    DATE_FORMAT = "%Y-%m-%d"
+    TIME_ONLY_FORMAT = "%H:%M:%S"
+
+
+# ==================== VALIDATION ====================
+
+def validate_texts() -> bool:
+    """Validate that all required text keys exist"""
+    required_keys = [
+        'welcome', 'register_prompt', 'register_success',
+        'deposit_select', 'balance', 'contact', 'invite'
+    ]
+    
+    missing_keys = []
+    for lang in get_supported_languages():
+        for key in required_keys:
+            if key not in TEXTS.get(lang, {}):
+                missing_keys.append(f"{lang}.{key}")
+    
+    if missing_keys:
+        print(f"⚠️ Missing text keys: {missing_keys}")
+        return False
+    return True
+
+
+# ==================== EXPORTS ====================
+__all__ = [
+    # Main texts
+    'TEXTS',
+    
+    # Game texts
+    'GAME_TEXTS',
+    'GAME_MESSAGES',
+    'ERROR_MESSAGES',
+    'SUCCESS_MESSAGES',
+    'INFO_MESSAGES',
+    'ADMIN_MESSAGES',
+    'TRANSFER_MESSAGES',
+    
+    # Emojis
+    'EMOJIS',
+    
+    # Helper functions
+    'get_text',
+    'get_game_text',
+    'get_error_message',
+    'get_success_message',
+    'format_with_emoji',
+    'get_supported_languages',
+    'get_language_name',
+    
+    # Constants
+    'TextConstants',
+    
+    # Validation
+    'validate_texts'
+]

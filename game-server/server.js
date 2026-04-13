@@ -1,3 +1,9 @@
+// =====================================================
+// ESTIF BINGO 24/7 - ULTIMATE GAME SERVER (OPTIMIZED)
+// Version: 3.0.0
+// Features: WebSockets, Bot API Integration, Admin Panel
+// =====================================================
+
 const express = require("express");
 const http = require("http");
 const https = require("https");
@@ -11,6 +17,8 @@ const { Pool } = require("pg");
 const fs = require("fs");
 const rateLimit = require("express-rate-limit");
 const { body, validationResult } = require("express-validator");
+const helmet = require("helmet");
+const morgan = require("morgan");
 require("dotenv").config();
 
 // ==================== ENVIRONMENT VALIDATION ====================
@@ -23,15 +31,38 @@ for (const env of requiredEnv) {
 }
 
 // ==================== KEEP-ALIVE HTTP AGENTS (PERFORMANCE) ====================
-const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
-const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 50 });
+const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 100, maxFreeSockets: 10 });
+const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 100, maxFreeSockets: 10 });
 
 // ==================== CIRCUIT BREAKER FOR BOT API ====================
 let circuitState = "CLOSED";
 let failureCount = 0;
 let lastFailureTime = 0;
-const FAILURE_THRESHOLD = 5;
+const FAILURE_THRESHOLD = 3;
 const OPEN_TIMEOUT = 30000;
+const HALF_OPEN_SUCCESS_THRESHOLD = 2;
+let halfOpenSuccesses = 0;
+
+// ==================== CACHE MANAGEMENT ====================
+const cache = new Map();
+const CACHE_TTL = 60000; // 60 seconds
+
+function getCached(key) {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+    }
+    return null;
+}
+
+function setCache(key, data) {
+    cache.set(key, { data, timestamp: Date.now() });
+}
+
+function clearCache() {
+    cache.clear();
+    console.log("🧹 Cache cleared");
+}
 
 // ==================== MIGRATION FLAG ====================
 const SKIP_AUTO_MIGRATIONS = process.env.MANUAL_MIGRATION === "true";
@@ -40,42 +71,76 @@ const SKIP_AUTO_MIGRATIONS = process.env.MANUAL_MIGRATION === "true";
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: "*" },
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
     transports: ["websocket", "polling"],
     pingTimeout: 60000,
     pingInterval: 25000,
-    allowEIO3: true
+    allowEIO3: true,
+    maxHttpBufferSize: 1e6,
+    serveClient: false
 });
 
-// ==================== MIDDLEWARE ====================
+// ==================== MIDDLEWARE (OPTIMIZED) ====================
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+}));
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
-app.use(compression({ level: 6, threshold: 512 }));
+app.use(express.static(path.join(__dirname, "public"), { maxAge: "1d", etag: true }));
+app.use(compression({ level: 9, threshold: 512, filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+}}));
 
-// Rate limiting for API endpoints
+// Logging in production
+if (process.env.NODE_ENV === "production") {
+    app.use(morgan("combined"));
+} else {
+    app.use(morgan("dev"));
+}
+
+// ==================== RATE LIMITING (OPTIMIZED) ====================
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 200,
-    message: { success: false, message: "Too many requests, please try again later." }
+    message: { success: false, message: "Too many requests, please try again later." },
+    skipSuccessfulRequests: false,
+    standardHeaders: true,
+    legacyHeaders: false
 });
 app.use("/api/", apiLimiter);
 
 const authLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 5,
-    skipSuccessfulRequests: true
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => req.ip
 });
 
-// ==================== BOT API CLIENT (WITH CIRCUIT BREAKER & KEEP-ALIVE) ====================
+const adminLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    skipSuccessfulRequests: false
+});
+
+// ==================== BOT API CLIENT (WITH CIRCUIT BREAKER & CACHE) ====================
 const BOT_API_URL = process.env.BOT_API_URL;
 const API_SECRET = process.env.API_SECRET;
 
-async function callBotAPI(endpoint, body, retries = 2) {
+async function callBotAPI(endpoint, body, retries = 2, useCache = false) {
+    const cacheKey = `${endpoint}:${JSON.stringify(body)}`;
+    
+    if (useCache) {
+        const cached = getCached(cacheKey);
+        if (cached) return cached;
+    }
+    
     if (circuitState === "OPEN") {
         if (Date.now() - lastFailureTime > OPEN_TIMEOUT) {
             circuitState = "HALF_OPEN";
+            halfOpenSuccesses = 0;
             console.log(`🔌 Circuit breaker HALF_OPEN for ${endpoint}`);
         } else {
             throw new Error(`Bot API circuit breaker OPEN for ${endpoint}`);
@@ -86,6 +151,9 @@ async function callBotAPI(endpoint, body, retries = 2) {
     const agent = url.startsWith("https") ? httpsAgent : httpAgent;
     
     for (let attempt = 1; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -95,8 +163,10 @@ async function callBotAPI(endpoint, body, retries = 2) {
                 },
                 body: JSON.stringify(body),
                 agent: agent,
-                timeout: 8000
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
             
             if (!response.ok) {
                 throw new Error(`Bot API error: ${response.status}`);
@@ -105,58 +175,96 @@ async function callBotAPI(endpoint, body, retries = 2) {
             const data = await response.json();
             
             if (circuitState === "HALF_OPEN") {
-                circuitState = "CLOSED";
+                halfOpenSuccesses++;
+                if (halfOpenSuccesses >= HALF_OPEN_SUCCESS_THRESHOLD) {
+                    circuitState = "CLOSED";
+                    failureCount = 0;
+                    console.log(`✅ Circuit breaker CLOSED for ${endpoint}`);
+                }
+            } else if (circuitState === "CLOSED") {
                 failureCount = 0;
-                console.log(`✅ Circuit breaker CLOSED for ${endpoint}`);
+            }
+            
+            if (useCache && data.success) {
+                setCache(cacheKey, data);
             }
             
             return data;
         } catch (err) {
+            clearTimeout(timeoutId);
             console.warn(`Bot API call failed (attempt ${attempt}/${retries}): ${endpoint} - ${err.message}`);
             
             if (attempt === retries) {
                 failureCount++;
                 lastFailureTime = Date.now();
-                if (failureCount >= FAILURE_THRESHOLD) {
+                if (failureCount >= FAILURE_THRESHOLD && circuitState !== "OPEN") {
                     circuitState = "OPEN";
                     console.error(`🔴 Circuit breaker OPEN for ${endpoint}`);
                 }
                 throw err;
             }
             
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
         }
     }
 }
 
-async function callBotAPIGet(endpoint) {
+async function callBotAPIGet(endpoint, useCache = false) {
+    if (useCache) {
+        const cached = getCached(endpoint);
+        if (cached) return cached;
+    }
+    
     const url = `${BOT_API_URL}${endpoint}`;
     const agent = url.startsWith("https") ? httpsAgent : httpAgent;
     
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: { 'X-API-Key': API_SECRET },
-        agent: agent,
-        timeout: 8000
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     
-    if (!response.ok) {
-        throw new Error(`Bot API error: ${response.status}`);
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'X-API-Key': API_SECRET },
+            agent: agent,
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`Bot API error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (useCache) {
+            setCache(endpoint, data);
+        }
+        
+        return data;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
     }
-    
-    return response.json();
 }
 
-// ==================== POSTGRESQL DATABASE (OPTIMISED) ====================
+// ==================== POSTGRESQL DATABASE (OPTIMISED WITH CONNECTION POOL) ====================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-    max: 30,
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 3000
+    max: 50,
+    min: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+    statementTimeout: 10000,
+    keepAlive: true
 });
 
-// ==================== MIGRATION SYSTEM ====================
+pool.on('error', (err) => {
+    console.error('Unexpected database error:', err);
+});
+
+// ==================== MIGRATION SYSTEM (ENHANCED) ====================
 async function runMigrations() {
     if (SKIP_AUTO_MIGRATIONS) {
         console.log("⚠️ MANUAL_MIGRATION=true - Skipping automatic migrations");
@@ -177,7 +285,8 @@ async function runMigrations() {
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) UNIQUE NOT NULL,
                 executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                executed_by VARCHAR(100) DEFAULT CURRENT_USER
+                executed_by VARCHAR(100) DEFAULT CURRENT_USER,
+                duration_ms INTEGER
             )
         `);
         
@@ -191,13 +300,14 @@ async function runMigrations() {
         for (const file of files) {
             if (!executedSet.has(file)) {
                 console.log(`📦 Running migration: ${file}`);
+                const startTime = Date.now();
                 try {
                     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
                     await client.query('BEGIN');
                     await client.query(sql);
-                    await client.query('INSERT INTO migrations (name) VALUES ($1)', [file]);
+                    await client.query('INSERT INTO migrations (name, duration_ms) VALUES ($1, $2)', [file, Date.now() - startTime]);
                     await client.query('COMMIT');
-                    console.log(`✅ Completed: ${file}`);
+                    console.log(`✅ Completed: ${file} (${Date.now() - startTime}ms)`);
                 } catch (err) {
                     await client.query('ROLLBACK');
                     console.error(`❌ Failed migration: ${file}`, err.message);
@@ -232,11 +342,15 @@ async function runManualMigration(migrationFile, options = {}) {
         }
         
         const sql = fs.readFileSync(filePath, 'utf8');
+        const startTime = Date.now();
+        
         await client.query('BEGIN');
         await client.query(sql);
         
         if (check.rows.length === 0) {
-            await client.query('INSERT INTO migrations (name) VALUES ($1)', [migrationFile]);
+            await client.query('INSERT INTO migrations (name, duration_ms) VALUES ($1, $2)', [migrationFile, Date.now() - startTime]);
+        } else if (force) {
+            await client.query('UPDATE migrations SET executed_at = NOW(), duration_ms = $1 WHERE name = $2', [Date.now() - startTime, migrationFile]);
         }
         
         await client.query('COMMIT');
@@ -254,7 +368,7 @@ async function getMigrationStatus() {
     const client = await pool.connect();
     try {
         const migrations = await client.query(`
-            SELECT name, executed_at, executed_by 
+            SELECT name, executed_at, executed_by, duration_ms 
             FROM migrations 
             ORDER BY executed_at DESC
         `);
@@ -268,6 +382,7 @@ async function getMigrationStatus() {
 async function initDatabase() {
     const client = await pool.connect();
     try {
+        // Core tables with optimized indexes
         await client.query(`
             CREATE TABLE IF NOT EXISTS game_rounds (
                 round_id SERIAL PRIMARY KEY,
@@ -280,9 +395,11 @@ async function initDatabase() {
                 winners JSONB,
                 winner_cartelas JSONB,
                 win_percentage INTEGER DEFAULT 80,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                duration_ms INTEGER
             )
         `);
+        
         await client.query(`
             CREATE TABLE IF NOT EXISTS game_transactions (
                 id SERIAL PRIMARY KEY,
@@ -296,18 +413,35 @@ async function initDatabase() {
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        
         await client.query(`
             CREATE TABLE IF NOT EXISTS active_round_selections (
                 round_number INTEGER NOT NULL,
                 cartela_number VARCHAR(20) NOT NULL,
                 telegram_id BIGINT NOT NULL,
+                username VARCHAR(100),
                 selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (round_number, cartela_number)
             )
         `);
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp)`);
+        
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS game_settings (
+                key VARCHAR(50) PRIMARY KEY,
+                value TEXT NOT NULL,
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Optimized indexes
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_rounds_number ON game_rounds(round_number DESC)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_active_round_selections_round ON active_round_selections(round_number)`);
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_active_round_selections_telegram ON active_round_selections(telegram_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id, timestamp DESC)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_type ON game_transactions(type, timestamp DESC)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_game_transactions_round ON game_transactions(round)`);
 
         // Add default sound pack setting if not exists
         await client.query(`
@@ -319,6 +453,7 @@ async function initDatabase() {
         console.log("✅ PostgreSQL core tables ready");
     } catch (err) {
         console.error("❌ DB init error:", err);
+        throw err;
     } finally {
         client.release();
     }
@@ -337,34 +472,73 @@ async function initializeDatabase() {
     }
 }
 
-// ==================== GAME LOG HELPER ====================
-async function logGameTransaction(telegramId, username, type, amount, cartela, round, note) {
-    await pool.query(`
-        INSERT INTO game_transactions (telegram_id, username, type, amount, cartela, round, note)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [telegramId, username, type, amount, cartela, round, note]);
+// ==================== GAME LOG HELPER (BATCHED) ====================
+const transactionBatch = [];
+let batchTimeout = null;
+
+async function flushTransactionBatch() {
+    if (transactionBatch.length === 0) return;
+    
+    const batch = [...transactionBatch];
+    transactionBatch.length = 0;
+    
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const tx of batch) {
+            await client.query(`
+                INSERT INTO game_transactions (telegram_id, username, type, amount, cartela, round, note)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [tx.telegramId, tx.username, tx.type, tx.amount, tx.cartela, tx.round, tx.note]);
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error("Failed to flush transaction batch:", err);
+    } finally {
+        client.release();
+    }
 }
 
-// ==================== LOAD CARTELAS FROM JSON FILE ====================
+async function logGameTransaction(telegramId, username, type, amount, cartela, round, note) {
+    transactionBatch.push({ telegramId, username, type, amount, cartela, round, note });
+    
+    if (batchTimeout) clearTimeout(batchTimeout);
+    batchTimeout = setTimeout(() => flushTransactionBatch(), 100);
+}
+
+// ==================== LOAD CARTELAS FROM JSON FILE (WITH CACHE) ====================
 const CARTELA_DATA_FILE = path.join(__dirname, "data/cartelas.json");
 let cartelasData = {};
+let cartelaKeys = [];
 
 try {
     if (fs.existsSync(CARTELA_DATA_FILE)) {
         const rawData = fs.readFileSync(CARTELA_DATA_FILE, "utf8");
         cartelasData = JSON.parse(rawData);
-        console.log(`✅ Loaded ${Object.keys(cartelasData).length} cartelas from data/cartelas.json`);
+        cartelaKeys = Object.keys(cartelasData);
+        console.log(`✅ Loaded ${cartelaKeys.length} cartelas from data/cartelas.json`);
     } else {
         console.warn(`⚠️ Cartela file not found at: ${CARTELA_DATA_FILE}`);
+        // Generate fallback cartelas
+        for (let i = 1; i <= 1000; i++) {
+            cartelasData[`CART-${String(i).padStart(4, '0')}`] = { grid: generateRandomGrid() };
+        }
+        cartelaKeys = Object.keys(cartelasData);
+        console.log(`✅ Generated ${cartelaKeys.length} fallback cartelas`);
     }
 } catch (err) {
     console.error("❌ Error loading cartelas:", err.message);
+    // Generate fallback cartelas
+    for (let i = 1; i <= 1000; i++) {
+        cartelasData[`CART-${String(i).padStart(4, '0')}`] = { grid: generateRandomGrid() };
+    }
+    cartelaKeys = Object.keys(cartelasData);
 }
 
-// ==================== CARTELA HELPER FUNCTIONS ====================
+// ==================== CARTELA HELPER FUNCTIONS (OPTIMIZED) ====================
 function getRandomNumbers(min, max, count) {
-    const numbers = [];
-    for (let i = min; i <= max; i++) numbers.push(i);
+    const numbers = Array.from({ length: max - min + 1 }, (_, i) => min + i);
     for (let i = numbers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
@@ -378,21 +552,17 @@ function generateRandomGrid() {
     const n = getRandomNumbers(31, 45, 5);
     const g = getRandomNumbers(46, 60, 5);
     const o = getRandomNumbers(61, 75, 5);
-    n[2] = 0;
-    return [
-        [b[0], i[0], n[0], g[0], o[0]],
-        [b[1], i[1], n[1], g[1], o[1]],
-        [b[2], i[2], n[2], g[2], o[2]],
-        [b[3], i[3], n[3], g[3], o[3]],
-        [b[4], i[4], n[4], g[4], o[4]]
-    ];
+    n[2] = 0; // Free space
+    return [b, i, n, g, o];
 }
 
 function getCartelaGrid(cartelaId) {
+    // Direct lookup
     if (cartelasData[cartelaId]) {
         return cartelasData[cartelaId].grid;
     }
-    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
+    // Prefix match (for old format)
+    const matchingKey = cartelaKeys.find(key => key.startsWith(cartelaId));
     if (matchingKey) {
         return cartelasData[matchingKey].grid;
     }
@@ -407,10 +577,10 @@ const NEXT_ROUND_DELAY = parseInt(process.env.NEXT_ROUND_DELAY) || 6000;
 const BET_AMOUNT = parseFloat(process.env.BET_AMOUNT) || 10;
 const WIN_PERCENTAGES = [70, 75, 76, 80];
 const DEFAULT_WIN_PERCENTAGE = 80;
-const MAX_CARTELAS = 4;
-const TOTAL_CARTELAS = Object.keys(cartelasData).length || 1000;
+const MAX_CARTELAS = parseInt(process.env.MAX_CARTELAS) || 4;
+const TOTAL_CARTELAS = cartelaKeys.length;
 
-// ==================== GLOBAL STATE ====================
+// ==================== GLOBAL STATE (OPTIMIZED) ====================
 let gameState = {
     status: "selection",
     round: 1,
@@ -434,18 +604,22 @@ let nextRoundTimer = null;
 let adminTokens = new Map();
 let activeSessions = new Map();
 
-// ==================== LOAD WIN PERCENTAGE FROM BOT ====================
+// Clean up admin tokens periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, timestamp] of adminTokens) {
+        if (now - timestamp > 7 * 24 * 60 * 60 * 1000) {
+            adminTokens.delete(token);
+        }
+    }
+}, 60 * 60 * 1000);
+
+// ==================== LOAD WIN PERCENTAGE FROM BOT (WITH CACHE) ====================
 async function loadWinPercentage() {
     try {
-        const response = await fetch(`${BOT_API_URL}/api/commission`, {
-            headers: { 'X-API-Key': API_SECRET },
-            agent: BOT_API_URL.startsWith("https") ? httpsAgent : httpAgent
-        });
-        if (response.ok) {
-            const json = await response.json();
-            gameState.winPercentage = json.percentage || DEFAULT_WIN_PERCENTAGE;
-            console.log(`✅ Loaded win percentage: ${gameState.winPercentage}%`);
-        }
+        const data = await callBotAPIGet("/api/commission", true);
+        gameState.winPercentage = data.percentage || DEFAULT_WIN_PERCENTAGE;
+        console.log(`✅ Loaded win percentage: ${gameState.winPercentage}%`);
     } catch (err) {
         console.warn("Could not load win percentage from bot, using default:", err.message);
     }
@@ -463,22 +637,24 @@ function broadcastToUserDevices(telegramId, event, data, excludeSocketId = null)
     }
 }
 
-// ==================== BINGO CHECKING ====================
+// ==================== BINGO CHECKING (OPTIMIZED) ====================
 function checkBingoWin(cartelaId, drawnNumbers) {
     const grid = getCartelaGrid(cartelaId);
     if (!grid) return { won: false, winningLines: [] };
     
     const drawnSet = new Set(drawnNumbers);
-    drawnSet.add(0);
+    drawnSet.add(0); // Free space
     
     const lines = [];
     
+    // Check rows
     for (let r = 0; r < 5; r++) {
         if (grid[r].every(v => drawnSet.has(v))) {
             lines.push(`Row ${r+1}`);
         }
     }
     
+    // Check columns
     for (let c = 0; c < 5; c++) {
         let win = true;
         for (let r = 0; r < 5; r++) {
@@ -490,6 +666,7 @@ function checkBingoWin(cartelaId, drawnNumbers) {
         if (win) lines.push(`Column ${c+1}`);
     }
     
+    // Check diagonals
     let d1 = true, d2 = true;
     for (let i = 0; i < 5; i++) {
         if (!drawnSet.has(grid[i][i])) d1 = false;
@@ -497,6 +674,18 @@ function checkBingoWin(cartelaId, drawnNumbers) {
     }
     if (d1) lines.push("Diagonal ↘");
     if (d2) lines.push("Diagonal ↙");
+    
+    // Check four corners
+    if (drawnSet.has(grid[0][0]) && drawnSet.has(grid[0][4]) && 
+        drawnSet.has(grid[4][0]) && drawnSet.has(grid[4][4])) {
+        lines.push("Four Corners");
+    }
+    
+    // Check full house (all numbers)
+    const allNumbers = grid.flat();
+    if (allNumbers.every(v => v === 0 || drawnSet.has(v))) {
+        lines.push("Full House (BINGO!)");
+    }
     
     return { won: lines.length > 0, winningLines: lines };
 }
@@ -510,11 +699,16 @@ async function reserveCartela(cartelaNumber, telegramId, username) {
     if (globalTakenCartelas.has(cartelaNumber)) return false;
     globalTakenCartelas.set(cartelaNumber, { telegramId, username, timestamp: Date.now() });
     globalTotalSelectedCartelas = globalTakenCartelas.size;
-    await pool.query(`
-        INSERT INTO active_round_selections (round_number, cartela_number, telegram_id)
-        VALUES ($1, $2, $3)
+    
+    // Async DB update (don't await for performance)
+    pool.query(`
+        INSERT INTO active_round_selections (round_number, cartela_number, telegram_id, username)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (round_number, cartela_number) DO NOTHING
-    `, [gameState.round, cartelaNumber, telegramId]);
+    `, [gameState.round, cartelaNumber, telegramId, username]).catch(err => 
+        console.error("Failed to save cartela selection:", err)
+    );
+    
     return true;
 }
 
@@ -523,10 +717,14 @@ async function releaseCartela(cartelaNumber, telegramId) {
     if (cartela && cartela.telegramId === telegramId) {
         globalTakenCartelas.delete(cartelaNumber);
         globalTotalSelectedCartelas = globalTakenCartelas.size;
-        await pool.query(`
+        
+        pool.query(`
             DELETE FROM active_round_selections
             WHERE round_number = $1 AND cartela_number = $2
-        `, [gameState.round, cartelaNumber]);
+        `, [gameState.round, cartelaNumber]).catch(err => 
+            console.error("Failed to delete cartela selection:", err)
+        );
+        
         return true;
     }
     return false;
@@ -546,11 +744,12 @@ function broadcastRewardPool() {
         totalBetAmount,
         winnerReward,
         winPercentage: gameState.winPercentage,
-        remainingCartelas: TOTAL_CARTELAS - totalCartelas
+        remainingCartelas: TOTAL_CARTELAS - totalCartelas,
+        pricePerCartela: BET_AMOUNT
     });
 }
 
-// ==================== GAME CORE ====================
+// ==================== GAME CORE (OPTIMIZED) ====================
 function getBingoLetter(num) {
     if (num <= 15) return "B";
     if (num <= 30) return "I";
@@ -560,24 +759,43 @@ function getBingoLetter(num) {
 }
 
 function formatTime(sec) { 
-    return `${Math.floor(sec/60)}:${(sec%60).toString().padStart(2,"0")}`; 
+    const mins = Math.floor(sec / 60);
+    const seconds = sec % 60;
+    return `${mins}:${seconds.toString().padStart(2, "0")}`; 
 }
 
 function broadcastGameState() {
     const playersList = Array.from(gameState.players.values()).map(p => ({
-        socketId: p.socketId, username: p.username, telegramId: p.telegramId,
-        selectedCount: p.selectedCartelas.length, selectedCartelas: p.selectedCartelas, balance: p.balance
+        socketId: p.socketId,
+        username: p.username,
+        telegramId: p.telegramId,
+        selectedCount: p.selectedCartelas.length,
+        selectedCartelas: p.selectedCartelas,
+        balance: p.balance
     }));
+    
     io.emit("gameState", {
-        status: gameState.status, round: gameState.round, timer: gameState.timer,
-        drawnNumbers: gameState.drawnNumbers, playersCount: gameState.players.size,
-        players: playersList, winPercentage: gameState.winPercentage,
-        totalBet: gameState.totalBet, winnerReward: gameState.winnerReward
+        status: gameState.status,
+        round: gameState.round,
+        timer: gameState.timer,
+        drawnNumbers: gameState.drawnNumbers,
+        playersCount: gameState.players.size,
+        players: playersList,
+        winPercentage: gameState.winPercentage,
+        totalBet: gameState.totalBet,
+        winnerReward: gameState.winnerReward,
+        totalCartelasSelected: globalTotalSelectedCartelas,
+        totalCartelasAvailable: TOTAL_CARTELAS
     });
 }
 
 function broadcastTimer() { 
-    io.emit("timerUpdate", { seconds: gameState.timer, round: gameState.round, formatted: formatTime(gameState.timer), phase: gameState.status }); 
+    io.emit("timerUpdate", { 
+        seconds: gameState.timer, 
+        round: gameState.round, 
+        formatted: formatTime(gameState.timer), 
+        phase: gameState.status 
+    }); 
 }
 
 function stopGame() { 
@@ -632,21 +850,27 @@ async function startActiveGame() {
     broadcastGameState();
     
     io.emit("gameStarted", {
-        round: gameState.round, totalPlayers: playersWithCartelas, totalCartelas,
-        totalBet: gameState.totalBet, winnerReward: gameState.winnerReward,
+        round: gameState.round,
+        totalPlayers: playersWithCartelas,
+        totalCartelas,
+        totalBet: gameState.totalBet,
+        winnerReward: gameState.winnerReward,
         winPercentage: gameState.winPercentage,
-        message: `🎲 Game started! ${totalCartelas} cartelas selected. Prize Pool: ${gameState.winnerReward} ETB`
+        message: `🎲 Game started! ${totalCartelas} cartelas selected. Prize Pool: ${gameState.winnerReward.toFixed(2)} ETB`
     });
     
     io.emit("finalRewardPool", {
-        totalSelectedCartelas: totalCartelas, totalBetAmount, winnerReward,
+        totalSelectedCartelas: totalCartelas,
+        totalBetAmount,
+        winnerReward,
         winPercentage: gameState.winPercentage,
-        message: `🎯 ${totalCartelas} cartelas selected! Total pool: ${totalBetAmount} ETB. Winner takes ${winnerReward} ETB!`
+        message: `🎯 ${totalCartelas} cartelas selected! Total pool: ${totalBetAmount.toFixed(2)} ETB. Winner takes ${winnerReward.toFixed(2)} ETB!`
     });
     
-    const numbers = Array.from({ length: 75 }, (_, i) => i+1);
+    // Create shuffled numbers array
+    const numbers = Array.from({ length: 75 }, (_, i) => i + 1);
     for (let i = numbers.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i+1));
+        const j = Math.floor(Math.random() * (i + 1));
         [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
     }
     
@@ -674,14 +898,17 @@ async function startActiveGame() {
         
         broadcastGameState();
         
-        const newWinners = [], details = [];
+        // Check for winners
+        const newWinners = [];
+        const winnerDetails = [];
+        
         for (const [sid, pl] of gameState.players) {
             if (pl.selectedCartelas.length && !gameState.winners.includes(sid)) {
                 for (const cid of pl.selectedCartelas) {
                     const { won, winningLines } = checkBingoWin(cid, gameState.drawnNumbers);
                     if (won) { 
                         newWinners.push(sid); 
-                        details.push({ socketId: sid, cartelaId: cid, winningLines, pattern: winningLines[0] }); 
+                        winnerDetails.push({ socketId: sid, cartelaId: cid, winningLines, pattern: winningLines[0] }); 
                         break; 
                     }
                 }
@@ -689,7 +916,7 @@ async function startActiveGame() {
         }
         
         if (newWinners.length && gameState.winners.length === 0) {
-            endRound(newWinners, details);
+            endRound(newWinners, winnerDetails);
         }
     }, DRAW_INTERVAL);
 }
@@ -701,9 +928,14 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
     gameState.winners = winnerSocketIds;
     gameState.roundEndTime = new Date();
     
+    const roundDuration = gameState.roundEndTime - gameState.roundStartTime;
     const winnerCount = winnerSocketIds.length;
     const perWinner = winnerCount ? gameState.winnerReward / winnerCount : 0;
-    const winnerNames = [], winnerCartelas = [];
+    const winnerNames = [];
+    const winnerCartelas = [];
+    
+    // Process winners in parallel
+    const winnerPromises = [];
     
     for (let i = 0; i < winnerSocketIds.length; i++) {
         const sid = winnerSocketIds[i];
@@ -729,43 +961,55 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
                 message: `🎉 You won ${perWinner.toFixed(2)} ETB!` 
             });
             
-            try {
-                const result = await callBotAPI("/api/add", {
+            // Async bot API call
+            winnerPromises.push(
+                callBotAPI("/api/add", {
                     telegram_id: pl.telegramId,
                     amount: perWinner,
                     round_id: gameState.round,
                     reason: `won round ${gameState.round}`
-                });
-                if (result.success) {
-                    pl.balance = result.new_balance;
-                    broadcastToUserDevices(pl.telegramId, "balanceUpdated", { 
-                        balance: pl.balance, 
-                        added: perWinner 
-                    });
-                }
-            } catch (err) {
-                console.error("Error calling bot API for add:", err);
-            }
+                }).then(result => {
+                    if (result.success) {
+                        pl.balance = result.new_balance;
+                        broadcastToUserDevices(pl.telegramId, "balanceUpdated", { 
+                            balance: pl.balance, 
+                            added: perWinner 
+                        });
+                    }
+                }).catch(err => console.error("Error calling bot API for add:", err))
+            );
             
+            // Log transaction (batched)
             await logGameTransaction(pl.telegramId, pl.username, "win", perWinner, det?.cartelaId, gameState.round, "Round win");
         }
     }
     
-    await pool.query(`
-        INSERT INTO game_rounds (round_number, total_players, total_cartelas, total_pool, winner_reward, admin_commission, winners, winner_cartelas, win_percentage, timestamp)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    `, [
-        gameState.round,
-        Array.from(gameState.players.values()).filter(p => p.selectedCartelas.length > 0).length,
-        globalTotalSelectedCartelas,
-        gameState.totalBet,
-        gameState.winnerReward,
-        gameState.adminCommission,
-        JSON.stringify(winnerNames),
-        JSON.stringify(winnerCartelas),
-        gameState.winPercentage,
-        new Date().toISOString()
-    ]);
+    await Promise.allSettled(winnerPromises);
+    
+    // Save round to database
+    const client = await pool.connect();
+    try {
+        await client.query(`
+            INSERT INTO game_rounds (round_number, total_players, total_cartelas, total_pool, winner_reward, admin_commission, winners, winner_cartelas, win_percentage, timestamp, duration_ms)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `, [
+            gameState.round,
+            Array.from(gameState.players.values()).filter(p => p.selectedCartelas.length > 0).length,
+            globalTotalSelectedCartelas,
+            gameState.totalBet,
+            gameState.winnerReward,
+            gameState.adminCommission,
+            JSON.stringify(winnerNames),
+            JSON.stringify(winnerCartelas),
+            gameState.winPercentage,
+            new Date().toISOString(),
+            roundDuration
+        ]);
+    } catch (err) {
+        console.error("Failed to save round:", err);
+    } finally {
+        client.release();
+    }
     
     io.emit("roundEnded", {
         winners: winnerNames,
@@ -777,6 +1021,7 @@ async function endRound(winnerSocketIds, winnerDetails = []) {
         commission: gameState.adminCommission,
         winPercentage: gameState.winPercentage,
         round: gameState.round,
+        duration: roundDuration,
         message: winnerCount ? `🎉 BINGO! Winners: ${winnerNames.join(", ")}. Each wins ${perWinner.toFixed(2)} ETB!` : "No winners this round!"
     });
     
@@ -807,7 +1052,10 @@ async function resetForNextRound() {
     globalTakenCartelas.clear();
     globalTotalSelectedCartelas = 0;
     
-    await pool.query("DELETE FROM active_round_selections WHERE round_number = $1", [gameState.round]);
+    // Async cleanup
+    pool.query("DELETE FROM active_round_selections WHERE round_number = $1", [gameState.round]).catch(err => 
+        console.error("Failed to clean active selections:", err)
+    );
     
     gameState.round++;
     gameState.status = "selection";
@@ -827,6 +1075,8 @@ async function resetForNextRound() {
         round: gameState.round, 
         timer: SELECTION_TIME,
         winPercentage: gameState.winPercentage,
+        pricePerCartela: BET_AMOUNT,
+        maxCartelas: MAX_CARTELAS,
         message: `🎲 Round ${gameState.round} starting! Select up to ${MAX_CARTELAS} cartelas within ${SELECTION_TIME} seconds.` 
     });
     
@@ -836,7 +1086,7 @@ async function resetForNextRound() {
 // ==================== CRASH RECOVERY ====================
 async function recoverFromCrash() {
     const res = await pool.query(`
-        SELECT round_number, cartela_number, telegram_id
+        SELECT round_number, cartela_number, telegram_id, username
         FROM active_round_selections
         ORDER BY selected_at
     `);
@@ -847,7 +1097,7 @@ async function recoverFromCrash() {
     }
     
     const roundNumber = res.rows[0].round_number;
-    console.log(`Recovering round ${roundNumber} with ${res.rows.length} selections`);
+    console.log(`🔄 Recovering round ${roundNumber} with ${res.rows.length} selections`);
     
     gameState.round = roundNumber;
     gameState.status = "selection";
@@ -859,7 +1109,7 @@ async function recoverFromCrash() {
     for (const row of res.rows) {
         globalTakenCartelas.set(row.cartela_number, { 
             telegramId: row.telegram_id, 
-            username: "recovering...", 
+            username: row.username || "recovering...", 
             timestamp: Date.now() 
         });
     }
@@ -870,7 +1120,7 @@ async function recoverFromCrash() {
     gameState.winnerReward = winnerReward;
     gameState.adminCommission = adminCommission;
     
-    console.log(`Recovered: ${globalTotalSelectedCartelas} cartelas, pool: ${gameState.totalBet} ETB`);
+    console.log(`✅ Recovered: ${globalTotalSelectedCartelas} cartelas, pool: ${gameState.totalBet.toFixed(2)} ETB`);
     startSelectionTimer();
 }
 
@@ -880,16 +1130,22 @@ const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "$2a$10$ZfdgMySJf
 
 app.post("/api/admin/login", authLimiter, async (req, res) => {
     const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ success: false, message: "Email and password required" });
+    }
+    
     if (email !== ADMIN_EMAIL) {
         return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
+    
     const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
     if (!isValid) {
         return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
+    
     const token = jwt.sign({ email, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "7d" });
     adminTokens.set(token, Date.now());
-    res.json({ success: true, token });
+    res.json({ success: true, token, expiresIn: "7d" });
 });
 
 function verifyAdminToken(req, res, next) {
@@ -900,26 +1156,27 @@ function verifyAdminToken(req, res, next) {
     next();
 }
 
-// ==================== ADMIN ENDPOINTS ====================
+// ==================== ADMIN ENDPOINTS (OPTIMIZED) ====================
 app.get("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
     try {
-        const data = await callBotAPIGet("/api/commission");
-        res.json({ success: true, percentage: data.percentage });
+        const data = await callBotAPIGet("/api/commission", true);
+        res.json({ success: true, percentage: data.percentage, available: data.available });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 });
 
-app.post("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/win-percentage", verifyAdminToken, adminLimiter, async (req, res) => {
     const { percentage } = req.body;
     if (!WIN_PERCENTAGES.includes(percentage)) {
-        return res.status(400).json({ success: false, message: "Invalid percentage" });
+        return res.status(400).json({ success: false, message: "Invalid percentage. Allowed: " + WIN_PERCENTAGES.join(", ") });
     }
     try {
         await callBotAPI("/api/commission", { percentage });
         gameState.winPercentage = percentage;
         io.emit("winPercentageChanged", { percentage });
         broadcastRewardPool();
+        clearCache();
         res.json({ success: true, message: `Win percentage updated to ${percentage}%` });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -927,25 +1184,22 @@ app.post("/api/admin/win-percentage", verifyAdminToken, async (req, res) => {
 });
 
 // ==================== ENHANCED SOUND MANAGEMENT ENDPOINTS ====================
-
-// Get default sound pack
 app.get("/api/admin/default-sound-pack", verifyAdminToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT value FROM game_settings WHERE key = 'default_sound_pack'");
         const defaultPack = result.rows[0]?.value || 'pack1';
-        res.json({ success: true, defaultSoundPack: defaultPack });
+        res.json({ success: true, defaultSoundPack: defaultPack, availablePacks: ['pack1', 'pack2', 'pack3', 'pack4'] });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 });
 
-// Set default sound pack for new players
-app.post("/api/admin/default-sound-pack", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/default-sound-pack", verifyAdminToken, adminLimiter, async (req, res) => {
     const { soundPack } = req.body;
     const validPacks = ['pack1', 'pack2', 'pack3', 'pack4'];
     
     if (!validPacks.includes(soundPack)) {
-        return res.status(400).json({ success: false, message: "Invalid sound pack" });
+        return res.status(400).json({ success: false, message: "Invalid sound pack. Allowed: pack1, pack2, pack3, pack4" });
     }
     
     try {
@@ -961,8 +1215,7 @@ app.post("/api/admin/default-sound-pack", verifyAdminToken, async (req, res) => 
     }
 });
 
-// Force sound pack for ALL currently connected players
-app.post("/api/admin/force-sound-pack", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/force-sound-pack", verifyAdminToken, adminLimiter, async (req, res) => {
     const { soundPack } = req.body;
     const validPacks = ['pack1', 'pack2', 'pack3', 'pack4'];
     
@@ -971,11 +1224,10 @@ app.post("/api/admin/force-sound-pack", verifyAdminToken, async (req, res) => {
     }
     
     try {
-        // Broadcast to all connected players
         io.emit("forceSoundPack", { soundPack });
         console.log(`🔊 Admin forced sound pack to ${soundPack} for all ${io.engine.clientsCount} connected players`);
         
-        res.json({ success: true, message: `All players forced to use ${soundPack} sound pack` });
+        res.json({ success: true, message: `All players forced to use ${soundPack} sound pack`, affectedPlayers: io.engine.clientsCount });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -991,7 +1243,7 @@ app.get("/api/admin/migrations", verifyAdminToken, async (req, res) => {
     }
 });
 
-app.post("/api/admin/migrate", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/migrate", verifyAdminToken, adminLimiter, async (req, res) => {
     const { migrationFile, force = false } = req.body;
     if (!migrationFile) {
         return res.status(400).json({ success: false, message: "migrationFile required" });
@@ -1013,17 +1265,21 @@ app.get("/api/admin/stats", verifyAdminToken, (req, res) => {
         round: gameState.round,
         timer: gameState.timer,
         drawnNumbers: gameState.drawnNumbers,
+        drawnCount: gameState.drawnNumbers.length,
         playersCount: players.length,
         totalBalance: totalBalance.toFixed(2),
         winPercentage: gameState.winPercentage,
         totalBet: gameState.totalBet,
         winnerReward: gameState.winnerReward,
         adminCommission: gameState.adminCommission,
-        globalSelectedCartelas: globalTotalSelectedCartelas
+        globalSelectedCartelas: globalTotalSelectedCartelas,
+        totalCartelasAvailable: TOTAL_CARTELAS,
+        uptime: process.uptime(),
+        circuitBreakerState: circuitState
     });
 });
 
-app.post("/api/admin/start-game", verifyAdminToken, (req, res) => {
+app.post("/api/admin/start-game", verifyAdminToken, adminLimiter, (req, res) => {
     if (gameState.status === "selection") {
         if (selectionTimer) clearInterval(selectionTimer);
         startActiveGame();
@@ -1033,17 +1289,17 @@ app.post("/api/admin/start-game", verifyAdminToken, (req, res) => {
     }
 });
 
-app.post("/api/admin/end-game", verifyAdminToken, (req, res) => {
+app.post("/api/admin/end-game", verifyAdminToken, adminLimiter, (req, res) => {
     if (gameState.status === "active") { 
         stopGame(); 
         endRound([]); 
-        res.json({ success: true }); 
+        res.json({ success: true, message: "Game ended" }); 
     } else {
-        res.json({ success: false });
+        res.json({ success: false, message: `Cannot end, status: ${gameState.status}` });
     }
 });
 
-app.post("/api/admin/reset-game", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/reset-game", verifyAdminToken, adminLimiter, async (req, res) => {
     stopGame();
     if (selectionTimer) clearInterval(selectionTimer);
     if (nextRoundTimer) clearTimeout(nextRoundTimer);
@@ -1051,16 +1307,15 @@ app.post("/api/admin/reset-game", verifyAdminToken, async (req, res) => {
     await pool.query("DELETE FROM active_round_selections");
     
     gameState = {
+        ...gameState,
         status: "selection",
         round: 1,
         timer: SELECTION_TIME,
         drawnNumbers: [],
         winners: [],
-        players: gameState.players,
         totalBet: 0,
         winnerReward: 0,
         adminCommission: 0,
-        winPercentage: gameState.winPercentage,
         roundStartTime: null,
         roundEndTime: null,
         gameActive: false
@@ -1076,7 +1331,7 @@ app.post("/api/admin/reset-game", verifyAdminToken, async (req, res) => {
     startSelectionTimer();
     broadcastRewardPool();
     io.emit("gameReset", { message: "Game reset by admin" });
-    res.json({ success: true });
+    res.json({ success: true, message: "Game reset successfully" });
 });
 
 app.get("/api/admin/players", verifyAdminToken, (req, res) => {
@@ -1084,13 +1339,17 @@ app.get("/api/admin/players", verifyAdminToken, (req, res) => {
         username: p.username,
         telegramId: p.telegramId,
         selectedCount: p.selectedCartelas.length,
+        selectedCartelas: p.selectedCartelas,
         balance: p.balance
     }));
-    res.json({ success: true, players });
+    res.json({ success: true, players, count: players.length });
 });
 
 app.post("/api/admin/search-players", verifyAdminToken, async (req, res) => {
     const { search } = req.body;
+    if (!search || search.length < 2) {
+        return res.status(400).json({ success: false, message: "Search term must be at least 2 characters" });
+    }
     try {
         const result = await callBotAPI("/api/search-players", { search });
         res.json(result);
@@ -1101,6 +1360,9 @@ app.post("/api/admin/search-players", verifyAdminToken, async (req, res) => {
 
 app.get("/api/admin/player/:telegramId", verifyAdminToken, async (req, res) => {
     const { telegramId } = req.params;
+    if (!telegramId || isNaN(parseInt(telegramId))) {
+        return res.status(400).json({ success: false, message: "Valid telegramId required" });
+    }
     try {
         const result = await callBotAPI("/api/get-user", { telegram_id: parseInt(telegramId) });
         res.json(result);
@@ -1109,12 +1371,15 @@ app.get("/api/admin/player/:telegramId", verifyAdminToken, async (req, res) => {
     }
 });
 
-app.post("/api/admin/adjust-balance", verifyAdminToken, async (req, res) => {
-    const { telegram_id, amount } = req.body;
+app.post("/api/admin/adjust-balance", verifyAdminToken, adminLimiter, async (req, res) => {
+    const { telegram_id, amount, reason } = req.body;
+    if (!telegram_id || amount === undefined) {
+        return res.status(400).json({ success: false, message: "telegram_id and amount required" });
+    }
     try {
-        const result = await callBotAPI("/api/adjust-balance", { telegram_id, amount });
+        const result = await callBotAPI("/api/adjust-balance", { telegram_id, amount, reason: reason || "Admin adjustment" });
         res.json(result);
-    } catch (err) {
+    } catch (err) {  
         res.status(500).json({ success: false, message: err.message });
     }
 });
@@ -1122,7 +1387,9 @@ app.post("/api/admin/adjust-balance", verifyAdminToken, async (req, res) => {
 // ==================== REPORT ENDPOINTS ====================
 app.get("/api/reports/daily", verifyAdminToken, async (req, res) => {
     const date = req.query.date || new Date().toISOString().split("T")[0];
-    const rounds = await pool.query("SELECT * FROM game_rounds WHERE DATE(timestamp) = $1 ORDER BY round_id DESC", [date]);
+    const rounds = await pool.query(`
+        SELECT * FROM game_rounds WHERE DATE(timestamp) = $1 ORDER BY round_id DESC
+    `, [date]);
     const totalGames = rounds.rows.length;
     const totalBet = rounds.rows.reduce((s, r) => s + (r.total_pool || 0), 0);
     const totalWon = rounds.rows.reduce((s, r) => s + (r.winner_reward || 0), 0);
@@ -1178,8 +1445,14 @@ app.get("/api/reports/range", verifyAdminToken, async (req, res) => {
 });
 
 app.get("/api/reports/commission", verifyAdminToken, async (req, res) => {
-    const rounds = await pool.query("SELECT round_id, timestamp, total_pool, winner_reward, admin_commission, win_percentage FROM game_rounds ORDER BY round_id DESC");
-    res.json({ success: true, commissionByRound: rounds.rows });
+    const rounds = await pool.query(`
+        SELECT round_id, round_number, timestamp, total_pool, winner_reward, admin_commission, win_percentage 
+        FROM game_rounds 
+        ORDER BY round_id DESC 
+        LIMIT 100
+    `);
+    const totalCommission = rounds.rows.reduce((s, r) => s + (r.admin_commission || 0), 0);
+    res.json({ success: true, commissionByRound: rounds.rows, totalCommission });
 });
 
 function getWeekNumber(date) {
@@ -1191,7 +1464,7 @@ function getWeekNumber(date) {
 }
 
 // ==================== GAME API ENDPOINTS ====================
-app.post("/api/exchange-code", async (req, res) => {
+app.post("/api/exchange-code", authLimiter, async (req, res) => {
     const { code } = req.body;
     if (!code) {
         return res.status(400).json({ success: false, error: "Code required" });
@@ -1207,28 +1480,8 @@ app.post("/api/exchange-code", async (req, res) => {
 
 app.get("/api/cartela/:id", (req, res) => {
     const cartelaId = req.params.id;
-    
-    if (cartelasData[cartelaId]) {
-        return res.json({ 
-            success: true, 
-            cartelaId: cartelaId, 
-            grid: cartelasData[cartelaId].grid 
-        });
-    }
-    
-    const matchingKey = Object.keys(cartelasData).find(key => key.startsWith(cartelaId));
-    if (matchingKey) {
-        return res.json({ 
-            success: true, 
-            cartelaId: matchingKey, 
-            grid: cartelasData[matchingKey].grid 
-        });
-    }
-    
-    res.status(404).json({ 
-        success: false, 
-        message: `Cartela ${cartelaId} not found` 
-    });
+    const grid = getCartelaGrid(cartelaId);
+    res.json({ success: true, cartelaId, grid });
 });
 
 app.get("/api/global-stats", (req, res) => {
@@ -1239,17 +1492,30 @@ app.get("/api/global-stats", (req, res) => {
         totalBetAmount, 
         winnerReward, 
         winPercentage: gameState.winPercentage, 
-        remainingCartelas: TOTAL_CARTELAS - totalCartelas 
+        remainingCartelas: TOTAL_CARTELAS - totalCartelas,
+        pricePerCartela: BET_AMOUNT,
+        maxCartelasPerPlayer: MAX_CARTELAS,
+        round: gameState.round,
+        status: gameState.status,
+        timer: gameState.timer
     });
 });
 
 app.get("/health", (req, res) => { 
-    res.json({ status: "OK", timestamp: new Date().toISOString() }); 
+    res.json({ 
+        status: "OK", 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        gameState: gameState.status,
+        round: gameState.round,
+        players: gameState.players.size,
+        circuitBreaker: circuitState
+    }); 
 });
 
-// ==================== SOCKET.IO AUTHENTICATION ====================
+// ==================== SOCKET.IO AUTHENTICATION (OPTIMIZED) ====================
 io.on("connection", (socket) => {
-    console.log(`🟢 New socket: ${socket.id}`);
+    console.log(`🟢 New socket: ${socket.id} (Total: ${io.engine.clientsCount})`);
 
     // Send default sound pack to newly connected player
     (async () => {
@@ -1283,6 +1549,7 @@ io.on("connection", (socket) => {
             }
             activeSessions.get(telegram_id).add(socket.id);
             
+            // Find existing player
             let existingPlayer = null;
             for (const [sid, p] of gameState.players) {
                 if (p.telegramId === telegram_id) {
@@ -1299,9 +1566,9 @@ io.on("connection", (socket) => {
                     username, 
                     balance,
                     selectedCartelas: existingPlayer.selectedCartelas, 
-                    totalWon: existingPlayer.totalWon, 
-                    totalPlayed: existingPlayer.totalPlayed, 
-                    gamesWon: existingPlayer.gamesWon 
+                    totalWon: existingPlayer.totalWon || 0, 
+                    totalPlayed: existingPlayer.totalPlayed || 0, 
+                    gamesWon: existingPlayer.gamesWon || 0 
                 };
                 gameState.players.set(socket.id, playerData);
             } else {
@@ -1325,7 +1592,13 @@ io.on("connection", (socket) => {
             socket.emit("authenticated", { 
                 success: true, 
                 user: { telegram_id, username, balance },
-                selectedCartelas: playerData.selectedCartelas 
+                selectedCartelas: playerData.selectedCartelas,
+                gameConfig: {
+                    betAmount: BET_AMOUNT,
+                    maxCartelas: MAX_CARTELAS,
+                    selectionTime: SELECTION_TIME,
+                    winPercentage: gameState.winPercentage
+                }
             });
             
             socket.emit("gameState", {
@@ -1336,7 +1609,9 @@ io.on("connection", (socket) => {
                 playersCount: gameState.players.size,
                 winPercentage: gameState.winPercentage,
                 totalBet: gameState.totalBet,
-                winnerReward: gameState.winnerReward
+                winnerReward: gameState.winnerReward,
+                totalCartelasSelected: globalTotalSelectedCartelas,
+                totalCartelasAvailable: TOTAL_CARTELAS
             });
             
             socket.emit("timerUpdate", { 
@@ -1373,14 +1648,15 @@ io.on("connection", (socket) => {
             if (player.selectedCartelas.length >= MAX_CARTELAS) throw new Error(`Max ${MAX_CARTELAS} cartelas per player`);
             if (player.selectedCartelas.includes(data.cartelaId)) throw new Error("Already selected");
             
-            const balanceResult = await callBotAPI("/api/balance", { telegram_id: player.telegramId });
+            // Check balance via cache first
+            const balanceResult = await callBotAPI("/api/balance", { telegram_id: player.telegramId }, 2, true);
             if (!balanceResult.success || balanceResult.balance < BET_AMOUNT) {
                 throw new Error(`Insufficient balance: ${balanceResult.balance || 0} ETB. Need ${BET_AMOUNT} ETB`);
             }
             
             if (!isCartelaAvailable(data.cartelaId)) {
                 const takenBy = globalTakenCartelas.get(data.cartelaId);
-                throw new Error(`❌ Cartela ${data.cartelaId} already taken by ${takenBy.username}`);
+                throw new Error(`❌ Cartela ${data.cartelaId} already taken by ${takenBy?.username || "another player"}`);
             }
             
             const deductResult = await callBotAPI("/api/deduct", {
@@ -1399,7 +1675,8 @@ io.on("connection", (socket) => {
             
             player.selectedCartelas.push(data.cartelaId);
             
-            await logGameTransaction(player.telegramId, player.username, "bet", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela selection");
+            // Async logging (non-blocking)
+            logGameTransaction(player.telegramId, player.username, "bet", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela selection");
             
             const selectionData = {
                 cartelaId: data.cartelaId,
@@ -1457,11 +1734,12 @@ io.on("connection", (socket) => {
                         player.balance = refundResult.new_balance;
                     }
                     
-                    await logGameTransaction(player.telegramId, player.username, "refund", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela deselected");
+                    logGameTransaction(player.telegramId, player.username, "refund", BET_AMOUNT, data.cartelaId, gameState.round, "Cartela deselected");
                     
                     const updateData = { 
                         selectedCartelas: player.selectedCartelas, 
-                        balance: player.balance 
+                        balance: player.balance,
+                        remainingSlots: MAX_CARTELAS - player.selectedCartelas.length
                     };
                     
                     socket.emit("selectionUpdated", updateData);
@@ -1494,6 +1772,8 @@ io.on("connection", (socket) => {
                 player.balance = result.balance;
                 socket.emit("balanceUpdated", { balance: player.balance, canPlay: player.balance >= BET_AMOUNT });
                 if (callback) callback({ success: true, balance: player.balance });
+            } else {
+                if (callback) callback({ success: false, error: "Failed to fetch balance" });
             }
         } catch (err) {
             if (callback) callback({ success: false, error: err.message });
@@ -1507,9 +1787,13 @@ io.on("connection", (socket) => {
                 round: gameState.round,
                 timer: gameState.timer,
                 drawnNumbers: gameState.drawnNumbers,
+                drawnCount: gameState.drawnNumbers.length,
                 winPercentage: gameState.winPercentage,
                 totalBet: gameState.totalBet,
-                winnerReward: gameState.winnerReward
+                winnerReward: gameState.winnerReward,
+                totalCartelasSelected: globalTotalSelectedCartelas,
+                totalCartelasAvailable: TOTAL_CARTELAS,
+                playersCount: gameState.players.size
             });
         }
     });
@@ -1520,11 +1804,15 @@ io.on("connection", (socket) => {
             callback({
                 balance: player.balance,
                 selectedCartelas: player.selectedCartelas,
+                selectedCount: player.selectedCartelas.length,
                 gameStatus: gameState.status,
                 timer: gameState.timer,
                 round: gameState.round,
-                drawnNumbers: gameState.drawnNumbers
+                drawnNumbers: gameState.drawnNumbers,
+                canSelect: gameState.status === "selection" && player.selectedCartelas.length < MAX_CARTELAS
             });
+        } else if (callback) {
+            callback({ error: "Player not authenticated" });
         }
     });
 
@@ -1540,7 +1828,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", () => {
-        console.log(`🔴 Socket disconnected: ${socket.id}`);
+        console.log(`🔴 Socket disconnected: ${socket.id} (Remaining: ${io.engine.clientsCount})`);
         
         let telegramToRemove = null;
         for (const [tid, sessions] of activeSessions) {
@@ -1563,11 +1851,22 @@ io.on("connection", (socket) => {
                 }
                 globalTotalSelectedCartelas = globalTakenCartelas.size;
                 gameState.players.delete(socket.id);
+                console.log(`🗑️ Removed player ${player.username} (${player.telegramId}) - no active sessions`);
             }
         }
         
         broadcastRewardPool();
         broadcastGameState();
+        
+        io.emit("playersUpdate", {
+            count: gameState.players.size,
+            players: Array.from(gameState.players.values()).map(p => ({
+                socketId: p.socketId,
+                username: p.username,
+                selectedCount: p.selectedCartelas.length,
+                balance: p.balance
+            }))
+        });
     });
 });
 
@@ -1577,9 +1876,21 @@ async function gracefulShutdown() {
     stopGame();
     if (selectionTimer) clearInterval(selectionTimer);
     if (nextRoundTimer) clearTimeout(nextRoundTimer);
+    
+    // Flush remaining transactions
+    if (transactionBatch.length > 0) {
+        await flushTransactionBatch();
+    }
+    
     await pool.end();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 10000);
+    server.close(() => {
+        console.log("✅ Server closed");
+        process.exit(0);
+    });
+    setTimeout(() => {
+        console.error("❌ Forced shutdown");
+        process.exit(1);
+    }, 10000);
 }
 
 process.on("SIGTERM", gracefulShutdown);
@@ -1591,6 +1902,8 @@ async function startServer() {
     
     await initializeDatabase();
     await loadWinPercentage();
+    
+    // Start crash recovery after 2 seconds
     setTimeout(() => recoverFromCrash(), 2000);
     startSelectionTimer();
     
@@ -1599,34 +1912,41 @@ async function startServer() {
     
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`
-╔═══════════════════════════════════════════════════════════════════════════╗
-║              🎲 ESTIF BINGO 24/7 - ULTIMATE EDITION (${TOTAL_CARTELAS} CARTELAS) 🎲    ║
-║                                                                           ║
-║     ✅ MAX CARTELAS PER PLAYER: ${MAX_CARTELAS}                                           ║
-║     ✅ BET AMOUNT: ${BET_AMOUNT} ETB                                           ║
-║     ✅ SELECTION TIME: ${SELECTION_TIME} seconds                                         ║
-║     ✅ DRAW INTERVAL: ${DRAW_INTERVAL/1000} seconds                                          ║
-║                                                                           ║
-║     ✅ CIRCUIT BREAKER PROTECTION ACTIVE                                  ║
-║     ✅ KEEP-ALIVE HTTP AGENTS ACTIVE                                      ║
-║     ✅ BOT INTEGRATION: Balance checks via Telegram                       ║
-║     ✅ SOUND MANAGEMENT: Admin can set default & force sound packs        ║
-║                                                                           ║
-║     📱 Player: ${PLAYER_URL}    ║
-║     🔐 Admin:  ${ADMIN_URL}     ║
-║                                                                           ║
-║     ✅ Commission adjustable (70/75/76/80) via admin panel                ║
-║     ✅ Sound packs served from /public/sounds/                            ║
-║     ✅ Full Telegram bot integration                                      ║
-║     ✅ ${TOTAL_CARTELAS} unique cartelas loaded from JSON                        ║
-║     ✅ Multi-device sync support                                          ║
-║     ✅ Crash recovery with active_round_selections                        ║
-║     ✅ Admin session expires in 7 days                                    ║
-╚═══════════════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+║                         🎲 ESTIF BINGO 24/7 - ULTIMATE EDITION 🎲                              ║
+╠═══════════════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                               ║
+║     ✅ TOTAL CARTELAS: ${TOTAL_CARTELAS.toString().padEnd(50)}║
+║     ✅ MAX CARTELAS PER PLAYER: ${MAX_CARTELAS.toString().padEnd(47)}║
+║     ✅ BET AMOUNT: ${BET_AMOUNT} ETB${" ".repeat(47 - BET_AMOUNT.toString().length)}║
+║     ✅ SELECTION TIME: ${SELECTION_TIME} seconds${" ".repeat(47 - SELECTION_TIME.toString().length)}║
+║     ✅ DRAW INTERVAL: ${DRAW_INTERVAL/1000} seconds${" ".repeat(47 - (DRAW_INTERVAL/1000).toString().length)}║
+║     ✅ WIN PERCENTAGES: ${WIN_PERCENTAGES.join(", ")}%${" ".repeat(41 - WIN_PERCENTAGES.join(", ").length)}║
+║                                                                                               ║
+║     ✅ CIRCUIT BREAKER PROTECTION ACTIVE                                                     ║
+║     ✅ KEEP-ALIVE HTTP AGENTS ACTIVE                                                         ║
+║     ✅ RESPONSE CACHING ENABLED                                                              ║
+║     ✅ BATCH DATABASE WRITES                                                                 ║
+║     ✅ BOT INTEGRATION: Balance checks via Telegram                                          ║
+║     ✅ SOUND MANAGEMENT: Admin can set default & force sound packs                           ║
+║                                                                                               ║
+║     📱 Player: ${PLAYER_URL}${" ".repeat(60 - PLAYER_URL.length)}║
+║     🔐 Admin:  ${ADMIN_URL}${" ".repeat(60 - ADMIN_URL.length)}║
+║                                                                                               ║
+║     ✅ Commission adjustable (70/75/76/80) via admin panel                                   ║
+║     ✅ Sound packs served from /public/sounds/                                               ║
+║     ✅ Full Telegram bot integration                                                         ║
+║     ✅ ${TOTAL_CARTELAS} unique cartelas loaded from JSON${" ".repeat(32 - TOTAL_CARTELAS.toString().length)}║
+║     ✅ Multi-device sync support                                                             ║
+║     ✅ Crash recovery with active_round_selections                                           ║
+║     ✅ Admin session expires in 7 days                                                       ║
+║     ✅ WebSocket ping timeout: 60s                                                           ║
+║                                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
         `);
-    }); 
+    });
 }
 
 startServer().catch(console.error);
 
-module.exports = { app, server, io, gameState, runManualMigration, getMigrationStatus };
+module.exports = { app, server, io, gameState, runManualMigration, getMigrationStatus, clearCache };

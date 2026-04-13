@@ -1,17 +1,32 @@
 {
   "name": "estif-bingo-advanced",
   "version": "4.0.0",
-  "description": "Estif Bingo 24/7 - Advanced Multiplayer Bingo Game with 1000 Cartelas",
+  "description": "Estif Bingo 24/7 - Advanced Multiplayer Bingo Game with 1000+ Cartelas, Real-time WebSocket, Telegram Integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "dev:watch": "nodemon --watch server.js --watch src --watch data server.js",
+    "dev:watch": "nodemon --watch server.js --watch src --watch data --watch migrations server.js",
+    "prod": "NODE_ENV=production node server.js",
+    "cluster": "NODE_ENV=production node cluster.js",
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:load": "node scripts/loadTest.js",
     "generate-cartelas": "node scripts/generateCartelas.js",
+    "generate:1000": "node scripts/generateCartelas.js --count=1000",
+    "generate:2000": "node scripts/generateCartelas.js --count=2000",
     "migrate": "node scripts/runMigrations.js",
+    "migrate:force": "node scripts/runMigrations.js --force",
+    "migrate:status": "node scripts/runMigrations.js --status",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean": "rm -rf logs/*.log data/temp/*",
+    "backup": "node scripts/backupDatabase.js",
+    "restore": "node scripts/restoreDatabase.js",
+    "monitor": "node scripts/monitor.js",
+    "health": "curl http://localhost:3000/health",
+    "stats": "curl http://localhost:3000/api/global-stats"
   },
   "keywords": [
     "bingo",
@@ -23,7 +38,14 @@
     "realtime",
     "websocket",
     "gambling",
-    "etb"
+    "etb",
+    "estif",
+    "bingo-247",
+    "real-time-gaming",
+    "cartela",
+    "bingo-game",
+    "telegram-bot",
+    "web-socket"
   ],
   "author": "Estifanos Yhannis",
   "license": "MIT",
@@ -31,6 +53,14 @@
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/estif-bingo-advanced.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/estif-bingo-advanced/issues"
+  },
+  "homepage": "https://estif-bingo-advanced.onrender.com",
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
@@ -45,25 +75,118 @@
     "pg": "^8.11.3",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "ws": "^8.16.0",
+    "ioredis": "^5.3.2",
+    "bull": "^4.11.5",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^7.1.5",
+    "express-slow-down": "^1.6.0",
+    "response-time": "^2.3.2",
+    "connect-timeout": "^1.9.0",
+    "morgan": "^1.10.0",
+    "cluster": "^0.7.7",
+    "os": "^0.1.2"
   },
   "devDependencies": {
     "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-security": "^1.7.1",
     "nodemon": "^3.0.1",
-    "prettier": "^3.1.1"
+    "prettier": "^3.1.1",
+    "supertest": "^6.3.3",
+    "jest": "^29.7.0",
+    "artillery": "^2.0.0-31",
+    "pm2": "^5.3.0"
   },
   "nodemonConfig": {
     "ignore": [
       "data/*.json",
       "logs/*.log",
-      "node_modules"
+      "node_modules",
+      "coverage",
+      ".git",
+      "backups"
     ],
     "watch": [
       "server.js",
       "src/",
-      "public/"
+      "public/",
+      "migrations/",
+      "scripts/"
     ],
-    "ext": "js,json,html,css",
-    "delay": 1000
+    "ext": "js,json,html,css,sql",
+    "delay": 1000,
+    "verbose": true,
+    "events": {
+      "start": "echo '🚀 Nodemon starting...'",
+      "restart": "echo '🔄 Nodemon restarting...'",
+      "crash": "echo '💥 Nodemon crashed!'"
+    }
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "server.js",
+      "src/**/*.js"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true
+    },
+    "extends": [
+      "eslint:recommended",
+      "plugin:node/recommended",
+      "plugin:security/recommended",
+      "prettier"
+    ],
+    "parserOptions": {
+      "ecmaVersion": "latest",
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-console": "off",
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "security/detect-object-injection": "off"
+    }
+  },
+  "prettier": {
+    "semi": true,
+    "trailingComma": "es5",
+    "singleQuote": true,
+    "printWidth": 100,
+    "tabWidth": 2,
+    "useTabs": false,
+    "bracketSpacing": true,
+    "arrowParens": "always",
+    "endOfLine": "lf"
+  },
+  "pm2": {
+    "apps": [
+      {
+        "name": "estif-bingo",
+        "script": "server.js",
+        "instances": "max",
+        "exec_mode": "cluster",
+        "watch": false,
+        "max_memory_restart": "1G",
+        "env": {
+          "NODE_ENV": "production"
+        },
+        "error_file": "logs/pm2-error.log",
+        "out_file": "logs/pm2-out.log",
+        "log_file": "logs/pm2-combined.log",
+        "time": true
+      }
+    ]
+  },
+  "private": false,
+  "funding": {
+    "type": "buymeacoffee",
+    "url": "https://buymeacoffee.com/estifbingo"
   }
 }
