@@ -277,6 +277,27 @@ class Database:
             
         logger.info("✅ Database tables ready")
 
+        @classmethod
+        async def _create_indexes(cls, conn):
+            """Create all indexes"""
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_registered ON users(registered)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_pending ON pending_withdrawals(status, requested_at) WHERE status = 'pending'")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_expires ON otp_codes(expires_at)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_telegram ON otp_codes(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_expires ON auth_codes(expires_at)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_code ON auth_codes(code)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_telegram ON auth_codes(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp ON game_transactions(timestamp DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_commission_logs_changed_at ON commission_logs(changed_at DESC)")
+
     @classmethod
     async def _ensure_columns(cls):
         """Ensure all required columns exist in users table"""
