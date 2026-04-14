@@ -126,6 +126,7 @@ def run_bot():
     application.add_handler(CommandHandler("reject_deposit", reject_deposit))
     application.add_handler(CommandHandler("approve_cashout", approve_cashout))
     application.add_handler(CommandHandler("reject_cashout", reject_cashout))
+    application.add_handler(CommandHandler("verify", verify_otp))
     
     # ==================== MESSAGE HANDLERS ====================
     application.add_handler(MessageHandler(filters.PHOTO, deposit_screenshot))

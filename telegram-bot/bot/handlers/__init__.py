@@ -1,5 +1,5 @@
 # telegram-bot/bot/handlers/__init__.py
-# Estif Bingo 24/7 - All Handlers Exports (UPDATED - Removed quick_play_callback)
+# Estif Bingo 24/7 - All Handlers Exports (UPDATED - Added verify_otp)
 
 # ==================== CORE HANDLERS ====================
 from .start import start, language_callback
@@ -7,7 +7,7 @@ from .register import register, handle_contact, register_phone, register_cancel,
 from .balance import balance
 from .invite import invite
 from .contact import contact_center
-from .bingo_otp import bingo_otp
+from .bingo_otp import bingo_otp, verify_otp  # ← ADDED verify_otp
 
 # ==================== FINANCIAL HANDLERS ====================
 from .deposit import (
@@ -85,6 +85,7 @@ __all__ = [
     'invite',
     'contact_center',
     'bingo_otp',
+    'verify_otp',           # ← ADDED verify_otp
     'legacy_play',
     'play',
     
@@ -148,6 +149,7 @@ def get_all_handlers():
         'invite': invite,
         'contact_center': contact_center,
         'bingo_otp': bingo_otp,
+        'verify_otp': verify_otp,  # ← ADDED verify_otp
         'deposit': deposit,
         'cashout': cashout,
         'transfer': transfer,
@@ -199,6 +201,7 @@ HANDLERS_INFO = {
         ('invite', 'Get your referral link'),
         ('contact', 'Contact support'),
         ('bingo_otp', 'Get OTP for game access'),
+        ('verify', 'Verify OTP code'),  # ← ADDED verify command info
     ],
     'admin_commands': [
         ('admin', 'Admin control panel'),
