@@ -116,345 +116,169 @@ class Database:
     
     @classmethod
     async def _init_tables(cls):
-        """Create all necessary tables if they don't exist"""
-        async with cls._pool.acquire() as conn:
-            # Users table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    -- Primary identifiers
-                    telegram_id BIGINT PRIMARY KEY,
-                    username VARCHAR(64),
-                    first_name VARCHAR(64),
-                    last_name VARCHAR(64),
-                    phone VARCHAR(20) UNIQUE,
-                    email VARCHAR(255),
-                    
-                    -- Balance & Financial
-                    balance DECIMAL(12,2) DEFAULT 0 CHECK (balance >= 0),
-                    total_deposited DECIMAL(12,2) DEFAULT 0 CHECK (total_deposited >= 0),
-                    total_withdrawn DECIMAL(12,2) DEFAULT 0 CHECK (total_withdrawn >= 0),
-                    total_won DECIMAL(12,2) DEFAULT 0 CHECK (total_won >= 0),
-                    total_bet DECIMAL(12,2) DEFAULT 0 CHECK (total_bet >= 0),
-                    total_refund DECIMAL(12,2) DEFAULT 0 CHECK (total_refund >= 0),
-                    total_bonus DECIMAL(12,2) DEFAULT 0 CHECK (total_bonus >= 0),
-                    
-                    -- Game Statistics
-                    games_played INTEGER DEFAULT 0 CHECK (games_played >= 0),
-                    games_won INTEGER DEFAULT 0 CHECK (games_won >= 0),
-                    games_lost INTEGER DEFAULT 0 CHECK (games_lost >= 0),
-                    games_drawn INTEGER DEFAULT 0 CHECK (games_drawn >= 0),
-                    current_streak INTEGER DEFAULT 0,
-                    best_streak INTEGER DEFAULT 0,
-                    worst_streak INTEGER DEFAULT 0,
-                    highest_win DECIMAL(12,2) DEFAULT 0 CHECK (highest_win >= 0),
-                    total_cartelas_bought INTEGER DEFAULT 0,
-                    
-                    -- Referral System
-                    referral_code VARCHAR(8) UNIQUE,
-                    referred_by BIGINT REFERENCES users(telegram_id) ON DELETE SET NULL,
-                    referral_count INTEGER DEFAULT 0 CHECK (referral_count >= 0),
-                    referral_earnings DECIMAL(12,2) DEFAULT 0 CHECK (referral_earnings >= 0),
-                    
-                    -- Registration & Status
-                    registered BOOLEAN DEFAULT FALSE,
-                    joined_group BOOLEAN DEFAULT FALSE,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    is_banned BOOLEAN DEFAULT FALSE,
-                    ban_reason TEXT,
-                    banned_at TIMESTAMP,
-                    is_verified BOOLEAN DEFAULT FALSE,
-                    verified_at TIMESTAMP,
-                    
-                    -- Preferences
-                    lang VARCHAR(2) DEFAULT 'en' CHECK (lang IN ('en', 'am')),
-                    sound_pack VARCHAR(20) DEFAULT 'pack1',
-                    sound_enabled BOOLEAN DEFAULT TRUE,
-                    animations_enabled BOOLEAN DEFAULT TRUE,
-                    auto_select_cartelas BOOLEAN DEFAULT FALSE,
-                    notifications_enabled BOOLEAN DEFAULT TRUE,
-                    theme VARCHAR(20) DEFAULT 'dark',
-                    notification_preferences JSONB DEFAULT '{}',
-                    
-                    -- Game Session
-                    current_game_session UUID,
-                    cartelas_selected INTEGER DEFAULT 0,
-                    last_round_played INTEGER,
-                    
-                    -- Timestamps
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    last_game_at TIMESTAMP WITH TIME ZONE,
-                    last_deposit_at TIMESTAMP WITH TIME ZONE,
-                    last_withdrawal_at TIMESTAMP WITH TIME ZONE,
-                    last_bonus_at TIMESTAMP WITH TIME ZONE,
-                    
-                    -- Security
-                    login_attempts INTEGER DEFAULT 0,
-                    locked_until TIMESTAMP WITH TIME ZONE,
-                    two_factor_enabled BOOLEAN DEFAULT FALSE,
-                    two_factor_secret TEXT,
-                    
-                    -- Metadata
-                    device_info JSONB DEFAULT '{}',
-                    ip_address INET,
-                    user_agent TEXT,
-                    notes TEXT,
-                    metadata JSONB DEFAULT '{}'
-                )
-            """)
-            
-            # Game rounds table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS game_rounds (
-                    round_id SERIAL PRIMARY KEY,
-                    round_number INTEGER NOT NULL,
-                    total_players INTEGER DEFAULT 0,
-                    total_cartelas INTEGER DEFAULT 0,
-                    total_pool DECIMAL(10,2) DEFAULT 0,
-                    winner_reward DECIMAL(10,2) DEFAULT 0,
-                    admin_commission DECIMAL(10,2) DEFAULT 0,
-                    winners JSONB DEFAULT '[]',
-                    winner_cartelas JSONB DEFAULT '[]',
-                    win_percentage INTEGER DEFAULT 80,
-                    drawn_numbers INTEGER[] DEFAULT '{}',
-                    duration_ms INTEGER,
-                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ended_at TIMESTAMP,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Game transactions table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS game_transactions (
-                    id SERIAL PRIMARY KEY,
-                    transaction_id VARCHAR(50) UNIQUE,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    username VARCHAR(50),
-                    type VARCHAR(20) NOT NULL,
-                    amount DECIMAL(10,2) NOT NULL,
-                    balance_before DECIMAL(10,2),
-                    balance_after DECIMAL(10,2),
-                    cartela VARCHAR(20),
-                    round INTEGER,
-                    note TEXT,
-                    metadata JSONB DEFAULT '{}',
-                    ip_address INET,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Game settings table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS game_settings (
-                    key VARCHAR(50) PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    value_type VARCHAR(20) DEFAULT 'string',
-                    description TEXT,
-                    description_am TEXT,
-                    is_public BOOLEAN DEFAULT FALSE,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_by VARCHAR(100)
-                )
-            """)
-            
-            # Pending withdrawals table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pending_withdrawals (
-                    id SERIAL PRIMARY KEY,
-                    withdrawal_id VARCHAR(50) UNIQUE,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    amount DECIMAL(12,2) NOT NULL,
-                    fee_amount DECIMAL(12,2) DEFAULT 0,
-                    net_amount DECIMAL(12,2) GENERATED ALWAYS AS (amount - fee_amount) STORED,
-                    account TEXT NOT NULL,
-                    account_name VARCHAR(100),
-                    method TEXT NOT NULL,
-                    status VARCHAR(20) DEFAULT 'pending',
-                    requested_at TIMESTAMP DEFAULT NOW(),
-                    processed_at TIMESTAMP,
-                    approved_at TIMESTAMP,
-                    rejected_at TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    processed_by VARCHAR(100),
-                    rejection_reason TEXT,
-                    note TEXT,
-                    metadata JSONB DEFAULT '{}'
-                )
-            """)
-            
-            # OTP codes table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS otp_codes (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    otp TEXT NOT NULL,
-                    otp_hash VARCHAR(255),
-                    purpose VARCHAR(50) DEFAULT 'login',
-                    expires_at TIMESTAMP NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    used_at TIMESTAMP,
-                    attempts INTEGER DEFAULT 0,
-                    max_attempts INTEGER DEFAULT 3,
-                    ip_address INET,
-                    user_agent TEXT,
-                    is_used BOOLEAN DEFAULT FALSE,
-                    is_blocked BOOLEAN DEFAULT FALSE,
-                    blocked_until TIMESTAMP
-                )
-            """)
-            
-            # Auth codes table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS auth_codes (
-                    id SERIAL PRIMARY KEY,
-                    code TEXT UNIQUE,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    purpose VARCHAR(50) DEFAULT 'game_access',
-                    expires_at TIMESTAMP NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    used_at TIMESTAMP,
-                    used BOOLEAN DEFAULT FALSE,
-                    max_uses INTEGER DEFAULT 1,
-                    use_count INTEGER DEFAULT 0,
-                    ip_address INET,
-                    user_agent TEXT,
-                    metadata JSONB DEFAULT '{}'
-                )
-            """)
-            
-            # Commission logs table (enhanced)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS commission_logs (
-                    id SERIAL PRIMARY KEY,
-                    old_percentage INTEGER NOT NULL,
-                    new_percentage INTEGER NOT NULL,
-                    changed_by VARCHAR(100),
-                    changed_by_id BIGINT,
-                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ip_address INET,
-                    reason TEXT,
-                    round_number INTEGER,
-                    total_pool DECIMAL(10,2),
-                    total_payout DECIMAL(10,2),
-                    admin_commission DECIMAL(10,2)
-                )
-            """)
-            
-            # Bonus logs table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS bonus_logs (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    bonus_type VARCHAR(50) NOT NULL,
-                    amount DECIMAL(10,2) NOT NULL,
-                    balance_before DECIMAL(10,2),
-                    balance_after DECIMAL(10,2),
-                    reason TEXT,
-                    expires_at TIMESTAMP,
-                    claimed_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            
-            # Daily bonuses table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS daily_bonuses (
-                    telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    last_claimed_date DATE,
-                    streak_count INTEGER DEFAULT 1,
-                    total_claimed DECIMAL(10,2) DEFAULT 0,
-                    updated_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            
-            # Tournament table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS tournaments (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(100) NOT NULL,
-                    description TEXT,
-                    start_date TIMESTAMP NOT NULL,
-                    end_date TIMESTAMP NOT NULL,
-                    prize_pool DECIMAL(10,2) DEFAULT 0,
-                    entry_fee DECIMAL(10,2) DEFAULT 0,
-                    max_participants INTEGER,
-                    current_participants INTEGER DEFAULT 0,
-                    status VARCHAR(20) DEFAULT 'upcoming',
-                    winners JSONB DEFAULT '[]',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            
-            # Tournament participants table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS tournament_participants (
-                    id SERIAL PRIMARY KEY,
-                    tournament_id INTEGER REFERENCES tournaments(id) ON DELETE CASCADE,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    score INTEGER DEFAULT 0,
-                    rank INTEGER,
-                    joined_at TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(tournament_id, telegram_id)
-                )
-            """)
-            
-            # Notifications table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS notifications (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    title VARCHAR(200) NOT NULL,
-                    message TEXT NOT NULL,
-                    type VARCHAR(50) DEFAULT 'info',
-                    is_read BOOLEAN DEFAULT FALSE,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    read_at TIMESTAMP
-                )
-            """)
-            
-            # Audit logs table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS audit_logs (
-                    id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    action VARCHAR(100) NOT NULL,
-                    entity_type VARCHAR(50),
-                    entity_id VARCHAR(100),
-                    old_value JSONB,
-                    new_value JSONB,
-                    ip_address INET,
-                    user_agent TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            
-            # Insert default game settings
-            await conn.execute("""
-                INSERT INTO game_settings (key, value, value_type, description, is_public) VALUES 
-                    ('win_percentage', '75', 'integer', 'Current game win percentage (70,75,76,80)', TRUE),
-                    ('default_sound_pack', 'pack1', 'string', 'Default sound pack for new players', TRUE),
-                    ('selection_time', '50', 'integer', 'Cartela selection time in seconds', FALSE),
-                    ('draw_interval', '4000', 'integer', 'Number draw interval in milliseconds', FALSE),
-                    ('next_round_delay', '6000', 'integer', 'Delay between rounds in milliseconds', FALSE),
-                    ('bet_amount', '10', 'integer', 'Cost per cartela in ETB', TRUE),
-                    ('max_cartelas', '4', 'integer', 'Maximum cartelas per player per round', TRUE),
-                    ('total_cartelas', '75', 'integer', 'Total available cartela types', FALSE),
-                    ('min_deposit', '10', 'integer', 'Minimum deposit amount', TRUE),
-                    ('max_deposit', '100000', 'integer', 'Maximum deposit amount', TRUE),
-                    ('min_withdrawal', '50', 'integer', 'Minimum withdrawal amount', TRUE),
-                    ('max_withdrawal', '10000', 'integer', 'Maximum withdrawal amount', TRUE),
-                    ('welcome_bonus', '30', 'integer', 'Welcome bonus amount', TRUE),
-                    ('referral_bonus', '10', 'integer', 'Referral bonus amount', TRUE),
-                    ('daily_bonus', '5', 'integer', 'Daily login bonus', TRUE),
-                    ('maintenance_mode', 'false', 'boolean', 'Maintenance mode status', TRUE),
-                    ('game_enabled', 'true', 'boolean', 'Game enabled status', TRUE)
-                ON CONFLICT (key) DO NOTHING
-            """)
-            
-        logger.info("✅ Database tables ready")
+    """Create all necessary tables if they don't exist"""
+    async with cls._pool.acquire() as conn:
+        # Users table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                telegram_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                phone TEXT UNIQUE,
+                balance DECIMAL(12,2) DEFAULT 0,
+                total_deposited DECIMAL(12,2) DEFAULT 0,
+                total_withdrawn DECIMAL(12,2) DEFAULT 0,
+                total_won DECIMAL(12,2) DEFAULT 0,
+                games_played INTEGER DEFAULT 0,
+                games_won INTEGER DEFAULT 0,
+                games_lost INTEGER DEFAULT 0,
+                current_streak INTEGER DEFAULT 0,
+                best_streak INTEGER DEFAULT 0,
+                highest_win DECIMAL(12,2) DEFAULT 0,
+                referral_code TEXT UNIQUE,
+                referred_by BIGINT,
+                referral_count INTEGER DEFAULT 0,
+                referral_earnings DECIMAL(12,2) DEFAULT 0,
+                registered BOOLEAN DEFAULT FALSE,
+                joined_group BOOLEAN DEFAULT FALSE,
+                is_active BOOLEAN DEFAULT TRUE,
+                is_banned BOOLEAN DEFAULT FALSE,
+                lang TEXT DEFAULT 'en',
+                sound_enabled BOOLEAN DEFAULT TRUE,
+                animations_enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                last_seen TIMESTAMP DEFAULT NOW(),
+                last_game_at TIMESTAMP
+            )
+        """)
+        
+        # Game rounds table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_rounds (
+                round_id SERIAL PRIMARY KEY,
+                round_number INTEGER NOT NULL,
+                total_players INTEGER DEFAULT 0,
+                total_cartelas INTEGER DEFAULT 0,
+                total_pool DECIMAL(10,2) DEFAULT 0,
+                winner_reward DECIMAL(10,2) DEFAULT 0,
+                admin_commission DECIMAL(10,2) DEFAULT 0,
+                winners JSONB DEFAULT '[]',
+                winner_cartelas JSONB DEFAULT '[]',
+                win_percentage INTEGER DEFAULT 80,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Game transactions table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_transactions (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+                username VARCHAR(50),
+                type VARCHAR(20) NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                cartela VARCHAR(20),
+                round INTEGER,
+                note TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Game settings table (SIMPLIFIED - removed value_type)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_settings (
+                key VARCHAR(50) PRIMARY KEY,
+                value TEXT NOT NULL,
+                description TEXT,
+                description_am TEXT,
+                is_public BOOLEAN DEFAULT FALSE,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by VARCHAR(100)
+            )
+        """)
+        
+        # Insert default game settings
+        await conn.execute("""
+            INSERT INTO game_settings (key, value, description, is_public) VALUES 
+                ('win_percentage', '75', 'Current game win percentage (70,75,76,80)', TRUE),
+                ('default_sound_pack', 'pack1', 'Default sound pack for new players', TRUE),
+                ('selection_time', '50', 'Cartela selection time in seconds', FALSE),
+                ('draw_interval', '4000', 'Number draw interval in milliseconds', FALSE),
+                ('next_round_delay', '6000', 'Delay between rounds in milliseconds', FALSE),
+                ('bet_amount', '10', 'Cost per cartela in ETB', TRUE),
+                ('max_cartelas', '4', 'Maximum cartelas per player per round', TRUE),
+                ('total_cartelas', '75', 'Total available cartela types', FALSE),
+                ('min_deposit', '10', 'Minimum deposit amount', TRUE),
+                ('max_deposit', '100000', 'Maximum deposit amount', TRUE),
+                ('min_withdrawal', '50', 'Minimum withdrawal amount', TRUE),
+                ('max_withdrawal', '10000', 'Maximum withdrawal amount', TRUE),
+                ('welcome_bonus', '30', 'Welcome bonus amount', TRUE),
+                ('referral_bonus', '10', 'Referral bonus amount', TRUE),
+                ('daily_bonus', '5', 'Daily login bonus', TRUE),
+                ('maintenance_mode', 'false', 'Maintenance mode status', TRUE),
+                ('game_enabled', 'true', 'Game enabled status', TRUE)
+            ON CONFLICT (key) DO NOTHING
+        """)
+        
+        # Pending withdrawals table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_withdrawals (
+                id SERIAL PRIMARY KEY,
+                withdrawal_id VARCHAR(50) UNIQUE,
+                telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+                amount DECIMAL(12,2) NOT NULL,
+                account TEXT NOT NULL,
+                method TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                requested_at TIMESTAMP DEFAULT NOW(),
+                processed_at TIMESTAMP,
+                approved_at TIMESTAMP,
+                rejected_at TIMESTAMP,
+                processed_by TEXT,
+                rejection_reason TEXT,
+                note TEXT
+            )
+        """)
+        
+        # OTP codes table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS otp_codes (
+                telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+                otp TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                attempts INTEGER DEFAULT 0
+            )
+        """)
+        
+        # Auth codes table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_codes (
+                code TEXT PRIMARY KEY,
+                telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                used BOOLEAN DEFAULT FALSE
+            )
+        """)
+        
+        # Commission logs table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS commission_logs (
+                id SERIAL PRIMARY KEY,
+                old_percentage INTEGER NOT NULL,
+                new_percentage INTEGER NOT NULL,
+                changed_by VARCHAR(100),
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create indexes
+        await cls._create_indexes(conn)
+        
+    logger.info("✅ Database tables ready")
 
     @classmethod
     async def _ensure_columns(cls):
