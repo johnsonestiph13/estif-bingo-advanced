@@ -1,12 +1,15 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Added Play button handler, removed quick_play_callback, added register_cancel
+# FIXED: Added single instance lock to prevent conflict errors
 
 import asyncio
 import logging
 import sys
 import threading
 import traceback
+import os
+import fcntl
+import atexit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,14 +20,53 @@ from bot.db.database import Database
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(__name__)
 
+# ==================== SINGLE INSTANCE LOCK ====================
+# Prevent multiple bot instances from running simultaneously
+_lock_file = None
+
+def acquire_instance_lock():
+    """Acquire a lock to ensure only one bot instance runs"""
+    global _lock_file
+    try:
+        # Create lock directory if it doesn't exist
+        lock_dir = '/tmp'
+        if not os.path.exists(lock_dir):
+            lock_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        lock_path = os.path.join(lock_dir, 'estif_bingo_bot.lock')
+        _lock_file = open(lock_path, 'w')
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        atexit.register(release_instance_lock)
+        logger.info("✅ Acquired instance lock")
+        return True
+    except (IOError, OSError):
+        logger.error("❌ Another bot instance is already running! Exiting...")
+        return False
+
+def release_instance_lock():
+    """Release the instance lock"""
+    global _lock_file
+    if _lock_file:
+        try:
+            fcntl.flock(_lock_file, fcntl.LOCK_UN)
+            _lock_file.close()
+            logger.info("✅ Released instance lock")
+        except Exception as e:
+            logger.error(f"Error releasing lock: {e}")
+
 
 def run_flask():
     """Run Flask in a separate thread for Game API"""
-    from flask import Flask
+    from flask import Flask, jsonify
     from flask_cors import CORS
     
     app = Flask(__name__)
     CORS(app)
+    
+    # Add health check endpoint
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        return jsonify({"status": "healthy", "bot": "running", "timestamp": __import__('datetime').datetime.utcnow().isoformat()}), 200
     
     from bot.api.game_api import game_api_bp
     app.register_blueprint(game_api_bp)
@@ -117,6 +159,7 @@ def run_bot():
     application.add_handler(CommandHandler("invite", invite))
     application.add_handler(CommandHandler("contact", contact_center))
     application.add_handler(CommandHandler("play", play_command))
+    application.add_handler(CommandHandler("verify", verify_otp))
     
     # Admin commands
     application.add_handler(CommandHandler("admin", admin_panel))
@@ -126,7 +169,6 @@ def run_bot():
     application.add_handler(CommandHandler("reject_deposit", reject_deposit))
     application.add_handler(CommandHandler("approve_cashout", approve_cashout))
     application.add_handler(CommandHandler("reject_cashout", reject_cashout))
-    application.add_handler(CommandHandler("verify", verify_otp))
     
     # ==================== MESSAGE HANDLERS ====================
     application.add_handler(MessageHandler(filters.PHOTO, deposit_screenshot))
@@ -266,11 +308,23 @@ def run_bot():
     logger.info("🤖 Estif Bingo Bot started successfully!")
     logger.info("📦 Features: Transfer | Game | Deposit | Cashout | Web App")
     
+    # Reset webhook before starting polling (to avoid conflicts)
+    try:
+        import httpx
+        bot_token = BOT_TOKEN
+        webhook_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+        response = httpx.post(webhook_url)
+        if response.status_code == 200:
+            logger.info("✅ Webhook cleared before starting polling")
+    except Exception as e:
+        logger.warning(f"Could not clear webhook: {e}")
+    
     # Run the bot with error catching
     try:
         application.run_polling(
             drop_pending_updates=True,
-            allowed_updates=['message', 'callback_query', 'web_app_data']
+            allowed_updates=['message', 'callback_query', 'web_app_data'],
+            stop_signals=None  # Prevent signal conflicts in container
         )
     except Exception as e:
         logger.error(f"💥 Bot crashed: {e}")
@@ -290,6 +344,10 @@ async def async_main():
 
 def main():
     """Main entry point"""
+    # Acquire instance lock to prevent multiple instances
+    if not acquire_instance_lock():
+        sys.exit(1)
+    
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(async_main())
@@ -315,7 +373,9 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
+        release_instance_lock()
     except Exception as e:
         logger.error(f"💥 Fatal error: {e}")
         traceback.print_exc()
+        release_instance_lock()
         sys.exit(1)
