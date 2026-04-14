@@ -2,7 +2,7 @@
 # Estif Bingo 24/7 - ULTIMATE DATABASE MODULE
 # Complete Database Management System with all features
 # Version: 4.0.0 - Production Ready
-
+import asyncio
 import asyncpg
 import logging
 from datetime import datetime, timedelta
