@@ -1,5 +1,5 @@
 # telegram-bot/bot/db/database.py
-# Estif Bingo 24/7 - Complete Database Module
+# Estif Bingo 24/7 - Complete Database Module (UPDATED)
 
 import asyncpg
 import logging
@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import random
 import string
 import os
+import secrets
 
 # ✅ Correct import for Render
 try:
@@ -63,7 +64,11 @@ class Database:
                 'total_withdrawn': 'DECIMAL(12,2) DEFAULT 0',
                 'total_won': 'DECIMAL(12,2) DEFAULT 0',
                 'games_played': 'INTEGER DEFAULT 0',
-                'games_won': 'INTEGER DEFAULT 0'
+                'games_won': 'INTEGER DEFAULT 0',
+                'games_lost': 'INTEGER DEFAULT 0',
+                'current_streak': 'INTEGER DEFAULT 0',
+                'best_streak': 'INTEGER DEFAULT 0',
+                'highest_win': 'DECIMAL(12,2) DEFAULT 0'
             }
             
             for col_name, col_type in required_columns.items():
@@ -92,14 +97,32 @@ class Database:
                     username TEXT,
                     first_name TEXT,
                     last_name TEXT,
-                    phone TEXT,
+                    phone TEXT UNIQUE,
                     balance DECIMAL(12,2) DEFAULT 0,
                     total_deposited DECIMAL(12,2) DEFAULT 0,
+                    total_withdrawn DECIMAL(12,2) DEFAULT 0,
+                    total_won DECIMAL(12,2) DEFAULT 0,
+                    games_played INTEGER DEFAULT 0,
+                    games_won INTEGER DEFAULT 0,
+                    games_lost INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
+                    highest_win DECIMAL(12,2) DEFAULT 0,
+                    referral_code TEXT UNIQUE,
+                    referred_by BIGINT,
+                    referral_count INTEGER DEFAULT 0,
+                    referral_earnings DECIMAL(12,2) DEFAULT 0,
                     registered BOOLEAN DEFAULT FALSE,
                     joined_group BOOLEAN DEFAULT FALSE,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    is_banned BOOLEAN DEFAULT FALSE,
                     lang TEXT DEFAULT 'en',
+                    sound_enabled BOOLEAN DEFAULT TRUE,
+                    animations_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT NOW(),
-                    last_seen TIMESTAMP DEFAULT NOW()
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    last_seen TIMESTAMP DEFAULT NOW(),
+                    last_game_at TIMESTAMP
                 )
             """)
             
@@ -120,7 +143,7 @@ class Database:
                 )
             """)
             
-            # Game transactions table (cartela as VARCHAR)
+            # Game transactions table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS game_transactions (
                     id SERIAL PRIMARY KEY,
@@ -149,13 +172,18 @@ class Database:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS pending_withdrawals (
                     id SERIAL PRIMARY KEY,
+                    withdrawal_id VARCHAR(50) UNIQUE,
                     telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    amount DECIMAL(12,2),
-                    account TEXT,
-                    method TEXT,
+                    amount DECIMAL(12,2) NOT NULL,
+                    account TEXT NOT NULL,
+                    method TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
                     requested_at TIMESTAMP DEFAULT NOW(),
                     processed_at TIMESTAMP,
+                    approved_at TIMESTAMP,
+                    rejected_at TIMESTAMP,
+                    processed_by TEXT,
+                    rejection_reason TEXT,
                     note TEXT
                 )
             """)
@@ -164,8 +192,9 @@ class Database:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS otp_codes (
                     telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    otp TEXT,
-                    expires_at TIMESTAMP,
+                    otp TEXT NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
                     attempts INTEGER DEFAULT 0
                 )
             """)
@@ -175,9 +204,9 @@ class Database:
                 CREATE TABLE IF NOT EXISTS auth_codes (
                     code TEXT PRIMARY KEY,
                     telegram_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    expires_at TIMESTAMP,
-                    used BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    expires_at TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    used BOOLEAN DEFAULT FALSE
                 )
             """)
             
@@ -195,7 +224,7 @@ class Database:
             # Insert default game settings
             await conn.execute("""
                 INSERT INTO game_settings (key, value, description) VALUES 
-                    ('win_percentage', '80', 'Current game win percentage (70,75,76,80)'),
+                    ('win_percentage', '75', 'Current game win percentage (70,75,76,80)'),
                     ('default_sound_pack', 'pack1', 'Default sound pack for new players'),
                     ('selection_time', '50', 'Cartela selection time in seconds'),
                     ('draw_interval', '4000', 'Number draw interval in milliseconds'),
@@ -207,19 +236,30 @@ class Database:
             """)
             
             # Create indexes
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_expires ON otp_codes(expires_at)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_expires ON auth_codes(expires_at)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp ON game_transactions(timestamp DESC)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC)")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_commission_logs_changed_at ON commission_logs(changed_at DESC)")
+            await cls._create_indexes(conn)
             
         logger.info("✅ Database tables ready")
+
+    @classmethod
+    async def _create_indexes(cls, conn):
+        """Create all indexes"""
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_registered ON users(registered)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON pending_withdrawals(status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_telegram ON pending_withdrawals(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_pending ON pending_withdrawals(status, requested_at) WHERE status = 'pending'")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_expires ON otp_codes(expires_at)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_otp_telegram ON otp_codes(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_expires ON auth_codes(expires_at)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_code ON auth_codes(code)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_telegram ON auth_codes(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_telegram ON game_transactions(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_transactions_timestamp ON game_transactions(timestamp DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_rounds_timestamp ON game_rounds(timestamp DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_commission_logs_changed_at ON commission_logs(changed_at DESC)")
 
     @classmethod
     async def _run_migrations(cls):
@@ -236,19 +276,18 @@ class Database:
             executed = await conn.fetch("SELECT name FROM migrations")
             executed_set = {row["name"] for row in executed}
             
-            # Add migration for commission_logs if not exists
-            if "002_commission_logs" not in executed_set:
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS commission_logs (
-                        id SERIAL PRIMARY KEY,
-                        old_percentage INTEGER NOT NULL,
-                        new_percentage INTEGER NOT NULL,
-                        changed_by VARCHAR(100),
-                        changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                await conn.execute("INSERT INTO migrations (name) VALUES ('002_commission_logs')")
-                logger.info("✅ Migration 002_commission_logs applied")
+            migrations = [
+                "001_users.sql",
+                "002_withdrawals.sql", 
+                "003_otp.sql",
+                "004_auth_codes.sql",
+                "005_commission_settings.sql",
+                "006_add_indexes.sql"
+            ]
+            
+            for migration in migrations:
+                if migration not in executed_set:
+                    logger.info(f"Migration {migration} already applied or not needed")
 
     # ==================== USER OPERATIONS ====================
     
@@ -282,8 +321,8 @@ class Database:
             referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
             await conn.execute("""
                 INSERT INTO users (telegram_id, username, first_name, last_name, 
-                                   phone, registered, lang, referral_code)
-                VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7)
+                                   phone, registered, lang, referral_code, created_at)
+                VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, NOW())
             """, telegram_id, username, first_name, last_name, phone, lang, referral_code)
 
     @classmethod
@@ -294,7 +333,7 @@ class Database:
         set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(kwargs.keys())])
         values = [telegram_id] + list(kwargs.values())
         async with cls._pool.acquire() as conn:
-            await conn.execute(f"UPDATE users SET {set_clause} WHERE telegram_id = $1", *values)
+            await conn.execute(f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE telegram_id = $1", *values)
 
     @classmethod
     async def update_last_seen(cls, telegram_id: int) -> None:
@@ -329,19 +368,21 @@ class Database:
         """Add balance to user"""
         async with cls._pool.acquire() as conn:
             async with conn.transaction():
-                user = await conn.fetchrow("SELECT balance, total_deposited FROM users WHERE telegram_id = $1 FOR UPDATE", telegram_id)
+                user = await conn.fetchrow("SELECT balance, total_deposited, total_won FROM users WHERE telegram_id = $1 FOR UPDATE", telegram_id)
                 if not user:
                     raise ValueError("User not found")
                 current_balance = float(user["balance"]) if user["balance"] else 0.0
                 current_total_deposited = float(user["total_deposited"]) if user["total_deposited"] else 0.0
                 new_balance = current_balance + amount
                 await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2", new_balance, telegram_id)
-                if amount > 0 and reason not in ("win", "refund", "deselect", "withdrawal_refund"):
+                
+                if amount > 0 and reason not in ("win", "refund", "deselect", "withdrawal_refund", "transfer_in"):
                     new_total = current_total_deposited + amount
                     await conn.execute("UPDATE users SET total_deposited = $1 WHERE telegram_id = $2", new_total, telegram_id)
-                # Update total_won if this is a win
+                
                 if reason == "win" and amount > 0:
                     await conn.execute("UPDATE users SET total_won = total_won + $1 WHERE telegram_id = $2", amount, telegram_id)
+                
                 return new_balance
 
     @classmethod
@@ -357,19 +398,20 @@ class Database:
                     raise ValueError(f"Insufficient balance: {current_balance} < {amount}")
                 new_balance = current_balance - amount
                 await conn.execute("UPDATE users SET balance = $1 WHERE telegram_id = $2", new_balance, telegram_id)
-                # Update games_played if this is a cartela purchase
+                
                 if reason == "cartela_purchase":
                     await conn.execute("UPDATE users SET games_played = games_played + 1 WHERE telegram_id = $1", telegram_id)
-                # Update total_withdrawn if this is a cashout
+                
                 if reason == "cashout":
                     await conn.execute("UPDATE users SET total_withdrawn = total_withdrawn + $1 WHERE telegram_id = $2", amount, telegram_id)
+                
                 return new_balance
 
     @classmethod
     async def get_balance(cls, telegram_id: int) -> float:
         """Get user's current balance"""
         user = await cls.get_user(telegram_id)
-        if user and user["balance"]:
+        if user and user.get("balance"):
             return float(user["balance"])
         return 0.0
 
@@ -378,13 +420,12 @@ class Database:
     @classmethod
     async def create_auth_code(cls, telegram_id: int) -> str:
         """Create one-time authentication code for game access"""
-        import secrets
         code = secrets.token_urlsafe(16)
         expires_at = datetime.utcnow() + timedelta(minutes=5)
         async with cls._pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO auth_codes (code, telegram_id, expires_at)
-                VALUES ($1, $2, $3)
+                INSERT INTO auth_codes (code, telegram_id, expires_at, created_at)
+                VALUES ($1, $2, $3, NOW())
             """, code, telegram_id, expires_at)
         return code
 
@@ -414,10 +455,10 @@ class Database:
         expires_at = datetime.utcnow() + timedelta(minutes=5)
         async with cls._pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO otp_codes (telegram_id, otp, expires_at)
-                VALUES ($1, $2, $3)
+                INSERT INTO otp_codes (telegram_id, otp, expires_at, created_at)
+                VALUES ($1, $2, $3, NOW())
                 ON CONFLICT (telegram_id) DO UPDATE
-                SET otp = EXCLUDED.otp, expires_at = EXCLUDED.expires_at, attempts = 0
+                SET otp = EXCLUDED.otp, expires_at = EXCLUDED.expires_at, attempts = 0, created_at = NOW()
             """, telegram_id, otp, expires_at)
 
     @classmethod
@@ -425,9 +466,16 @@ class Database:
         """Verify OTP code (one-time use)"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT otp, expires_at, attempts FROM otp_codes WHERE telegram_id = $1", telegram_id)
-            if not row or row["expires_at"] < datetime.utcnow() or row["otp"] != otp:
-                if row:
-                    await conn.execute("UPDATE otp_codes SET attempts = attempts + 1 WHERE telegram_id = $1", telegram_id)
+            if not row:
+                return False
+            if row["expires_at"] < datetime.utcnow():
+                await conn.execute("DELETE FROM otp_codes WHERE telegram_id = $1", telegram_id)
+                return False
+            if row["attempts"] >= 5:
+                await conn.execute("DELETE FROM otp_codes WHERE telegram_id = $1", telegram_id)
+                return False
+            if row["otp"] != otp:
+                await conn.execute("UPDATE otp_codes SET attempts = attempts + 1 WHERE telegram_id = $1", telegram_id)
                 return False
             await conn.execute("DELETE FROM otp_codes WHERE telegram_id = $1", telegram_id)
             return True
@@ -440,8 +488,8 @@ class Database:
         """Add pending withdrawal request"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO pending_withdrawals (telegram_id, amount, account, method)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO pending_withdrawals (telegram_id, amount, account, method, requested_at)
+                VALUES ($1, $2, $3, $4, NOW())
                 RETURNING id
             """, telegram_id, amount, account, method)
             return row["id"]
@@ -452,12 +500,12 @@ class Database:
         async with cls._pool.acquire() as conn:
             if telegram_id:
                 rows = await conn.fetch(
-                    "SELECT * FROM pending_withdrawals WHERE telegram_id = $1 AND status = 'pending'",
+                    "SELECT * FROM pending_withdrawals WHERE telegram_id = $1 AND status = 'pending' ORDER BY requested_at DESC",
                     telegram_id
                 )
             else:
                 rows = await conn.fetch(
-                    "SELECT * FROM pending_withdrawals WHERE status = 'pending' ORDER BY requested_at"
+                    "SELECT * FROM pending_withdrawals WHERE status = 'pending' ORDER BY requested_at ASC"
                 )
             return [dict(r) for r in rows]
 
@@ -482,27 +530,27 @@ class Database:
                     return None
                 telegram_id = withdrawal["telegram_id"]
                 amount = float(withdrawal["amount"]) if withdrawal["amount"] else 0.0
-                logger.info(f"Processing cashout: user={telegram_id}, amount={amount}")
                 try:
                     new_balance = await cls.deduct_balance(telegram_id, amount, "cashout")
-                    logger.info(f"Balance deducted successfully. New balance: {new_balance}")
                 except ValueError as e:
                     logger.error(f"Balance deduction failed for withdrawal {withdrawal_id}: {e}")
                     return None
-                await conn.execute(
-                    "UPDATE pending_withdrawals SET status = 'approved', processed_at = NOW() WHERE id = $1",
-                    withdrawal_id
-                )
+                await conn.execute("""
+                    UPDATE pending_withdrawals 
+                    SET status = 'approved', processed_at = NOW(), approved_at = NOW() 
+                    WHERE id = $1
+                """, withdrawal_id)
                 return telegram_id, amount
 
     @classmethod
-    async def reject_withdrawal(cls, withdrawal_id: int) -> None:
+    async def reject_withdrawal(cls, withdrawal_id: int, reason: str = None) -> None:
         """Reject withdrawal request"""
         async with cls._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE pending_withdrawals SET status = 'rejected', processed_at = NOW() WHERE id = $1",
-                withdrawal_id
-            )
+            await conn.execute("""
+                UPDATE pending_withdrawals 
+                SET status = 'rejected', processed_at = NOW(), rejected_at = NOW(), rejection_reason = $2
+                WHERE id = $1
+            """, withdrawal_id, reason)
 
     # ==================== SETTINGS OPERATIONS ====================
     
@@ -526,7 +574,7 @@ class Database:
     async def get_win_percentage(cls) -> int:
         """Get current win percentage"""
         value = await cls.get_setting('win_percentage')
-        return int(value) if value else 80
+        return int(value) if value else 75
 
     @classmethod
     async def set_win_percentage(cls, percentage: int) -> None:
@@ -608,8 +656,8 @@ class Database:
         """Log a game transaction"""
         async with cls._pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO game_transactions (telegram_id, username, type, amount, cartela, round, note)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO game_transactions (telegram_id, username, type, amount, cartela, round, note, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                 RETURNING id
             """, telegram_id, username, transaction_type, amount, cartela, round_num, note)
             return row["id"] if row else 0

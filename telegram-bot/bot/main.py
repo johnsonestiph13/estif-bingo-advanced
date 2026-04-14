@@ -1,6 +1,6 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Removed quick_play_callback, added register_cancel
+# FIXED: Added Play button handler, removed quick_play_callback, added register_cancel
 
 import asyncio
 import logging
@@ -131,8 +131,8 @@ def run_bot():
     application.add_handler(MessageHandler(filters.PHOTO, deposit_screenshot))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     
-    # Menu button handlers
-    application.add_handler(MessageHandler(filters.Regex("🎮 Play|🎮 ጨዋታ"), play))
+    # Menu button handlers - UPDATED with Play button at the top
+    application.add_handler(MessageHandler(filters.Regex("^🎮 Play$|^🎮 ጨዋታ$"), play))
     application.add_handler(MessageHandler(filters.Regex("📝 Register|📝 ተመዝገብ"), register))
     application.add_handler(MessageHandler(filters.Regex("💰 Deposit|💰 ገንዘብ አስገባ"), deposit))
     application.add_handler(MessageHandler(filters.Regex("💳 Cash Out|💳 ገንዘብ አውጣ"), cashout))

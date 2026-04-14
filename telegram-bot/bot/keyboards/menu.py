@@ -2,17 +2,20 @@
 # Estif Bingo 24/7 - Keyboard Menu with Transfer Feature
 
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from bot.texts.emojis import get_emoji
 
 def menu(lang='en'):
     """Return main menu keyboard based on language (Reply Keyboard)"""
     if lang == 'am':
         return ReplyKeyboardMarkup([
+            ["🎮 ጨዋታ"],  # Play button on its own row at the top
             ["📝 ተመዝገብ", "💰 ገንዘብ አስገባ"],
             ["💳 ገንዘብ አውጣ", "📞 ደንበኛ አገልግሎት"],
             ["🎉 ጋብዝ", "💸 ገንዘብ አስተላልፍ", "🔐 የቢንጎ ኮድ"]
         ], resize_keyboard=True)
     else:
         return ReplyKeyboardMarkup([
+            ["🎮 Play"],  # Play button on its own row at the top
             ["📝 Register", "💰 Deposit"],
             ["💳 Cash Out", "📞 Contact Center"],
             ["🎉 Invite", "💸 Transfer", "🔐 Bingo Code"]
@@ -25,6 +28,7 @@ def main_menu_inline(user):
     
     if lang == 'am':
         keyboard = [
+            [InlineKeyboardButton("🎮 ጨዋታ", callback_data="play")],  # Play at the top
             [InlineKeyboardButton("📝 ተመዝገብ", callback_data="register")],
             [InlineKeyboardButton("💰 ገንዘብ አስገባ", callback_data="deposit")],
             [InlineKeyboardButton("💳 ገንዘብ አውጣ", callback_data="cashout")],
@@ -36,6 +40,7 @@ def main_menu_inline(user):
         ]
     else:
         keyboard = [
+            [InlineKeyboardButton("🎮 Play", callback_data="play")],  # Play at the top
             [InlineKeyboardButton("📝 Register", callback_data="register")],
             [InlineKeyboardButton("💰 Deposit", callback_data="deposit")],
             [InlineKeyboardButton("💳 Cash Out", callback_data="cashout")],

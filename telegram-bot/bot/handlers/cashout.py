@@ -1,9 +1,10 @@
 # telegram-bot/bot/handlers/cashout.py
-# Estif Bingo 24/7 - Cashout Request Handler with Withdrawal Method Selection
+# Estif Bingo 24/7 - Complete Cashout Handler (FULLY FIXED)
 
 import logging
 import random
 import re
+from typing import Optional, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.db.database import Database
@@ -15,14 +16,15 @@ from bot.texts.emojis import get_emoji
 
 logger = logging.getLogger(__name__)
 
-# Conversation states
-AMOUNT = 1
-METHOD = 2
-ACCOUNT = 3
+# ==================== CONVERSATION STATES ====================
+METHOD = 1   # Waiting for method selection
+AMOUNT = 2   # Waiting for amount input  
+ACCOUNT = 3  # Waiting for account number
 
 
+# ==================== MAIN CASHOUT HANDLER ====================
 async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show cashout payment methods"""
+    """Show cashout payment methods - Entry point"""
     telegram_id = update.effective_user.id
     user = await Database.get_user(telegram_id)
     lang = user.get('lang', 'en') if user else 'en'
@@ -49,13 +51,17 @@ async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balance = user.get('balance', 0)
     if balance < config.MIN_WITHDRAWAL:
         await update.message.reply_text(
-            TEXTS[lang]['insufficient_balance'],
+            f"{get_emoji('error')} {TEXTS[lang]['insufficient_balance']}",
             parse_mode='Markdown',
             reply_markup=menu(lang)
         )
         return ConversationHandler.END
     
-    # Show cashout methods using keyboard from menu.py
+    # Clear any existing cashout data
+    context.user_data.pop('cashout_method', None)
+    context.user_data.pop('cashout_amount', None)
+    
+    # Show cashout methods
     keyboard = cashout_methods_keyboard(lang)
     await update.message.reply_text(
         f"{get_emoji('withdraw')} {TEXTS[lang]['cashout_select']}",
@@ -104,7 +110,8 @@ async def cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"{get_emoji('info')} {TEXTS[lang]['cashout_selected'].format(method_key, balance)}\n\n"
-            f"{get_emoji('money')} Enter amount to withdraw (Min: {config.MIN_WITHDRAWAL} ETB, Max: {config.MAX_WITHDRAWAL} ETB):",
+            f"{get_emoji('money')} Enter amount to withdraw (Min: {config.MIN_WITHDRAWAL} ETB, Max: {config.MAX_WITHDRAWAL} ETB):\n\n"
+            f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
@@ -119,21 +126,32 @@ async def cashout_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user_data.get('lang', 'en') if user_data else 'en'
     
     text = update.message.text.strip()
-    nums = re.findall(r"\d+\.?\d*", text)
     
+    # Extract numbers from text
+    nums = re.findall(r"\d+\.?\d*", text)
     if not nums:
         await update.message.reply_text(
-            f"{get_emoji('error')} Please enter a valid amount (e.g., 500)",
+            f"{get_emoji('error')} Please enter a valid amount (e.g., 500)\n\n"
+            f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
     
-    amount = float(nums[0])
-    method = context.user_data.get('cashout_method')
+    try:
+        amount = float(nums[0])
+    except ValueError:
+        await update.message.reply_text(
+            f"{get_emoji('error')} Invalid amount. Please enter a number.\n\n"
+            f"Type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+        return AMOUNT
     
+    method = context.user_data.get('cashout_method')
     if not method:
         await update.message.reply_text(
-            f"{get_emoji('error')} Session expired. Please start cashout again with /cashout",
+            f"{get_emoji('error')} Session expired. Please start cashout again with /cashout\n\n"
+            f"Type /cancel to cancel.",
             reply_markup=menu(lang),
             parse_mode='Markdown'
         )
@@ -142,21 +160,27 @@ async def cashout_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Validate amount
     if amount < config.MIN_WITHDRAWAL:
         await update.message.reply_text(
-            f"{get_emoji('error')} Minimum withdrawal is {config.MIN_WITHDRAWAL} ETB",
+            f"{get_emoji('error')} Minimum withdrawal is {config.MIN_WITHDRAWAL} ETB\n\n"
+            f"Please enter a larger amount or type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
     
     if amount > config.MAX_WITHDRAWAL:
         await update.message.reply_text(
-            f"{get_emoji('error')} Maximum withdrawal is {config.MAX_WITHDRAWAL} ETB",
+            f"{get_emoji('error')} Maximum withdrawal is {config.MAX_WITHDRAWAL} ETB\n\n"
+            f"Please enter a smaller amount or type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
     
-    if amount > user_data.get('balance', 0):
+    current_balance = user_data.get('balance', 0)
+    if amount > current_balance:
         await update.message.reply_text(
-            f"{get_emoji('error')} Insufficient balance! Your balance: {user_data.get('balance', 0):.2f} ETB",
+            f"{get_emoji('error')} Insufficient balance!\n\n"
+            f"Your balance: {current_balance:.2f} ETB\n"
+            f"Requested: {amount:.2f} ETB\n\n"
+            f"Please enter a smaller amount or type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
@@ -164,17 +188,10 @@ async def cashout_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store amount
     context.user_data['cashout_amount'] = amount
     
-    # Calculate fee if applicable
-    fee = (amount * config.WITHDRAWAL_FEE_PERCENTAGE) / 100 if config.ENABLE_WITHDRAWAL_FEE else 0
-    net_amount = amount - fee
-    
-    fee_msg = ""
-    if fee > 0:
-        fee_msg = f"\n{get_emoji('info')} Fee ({config.WITHDRAWAL_FEE_PERCENTAGE}%): {fee:.2f} ETB\n{get_emoji('money')} You will receive: {net_amount:.2f} ETB"
-    
     await update.message.reply_text(
-        f"{get_emoji('success')} {TEXTS[lang]['cashout_amount_accepted'].format(amount)}{fee_msg}\n\n"
-        f"{get_emoji('phone')} Please enter your {method} account number:",
+        f"{get_emoji('success')} Amount: {amount:.2f} ETB accepted.\n\n"
+        f"{get_emoji('phone')} Please enter your {method} account number:\n\n"
+        f"Type /cancel to cancel.",
         parse_mode='Markdown'
     )
     return ACCOUNT
@@ -191,7 +208,8 @@ async def cashout_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not account or len(account) < 3:
         await update.message.reply_text(
-            f"{get_emoji('error')} Please enter a valid account number",
+            f"{get_emoji('error')} Please enter a valid account number (at least 3 characters)\n\n"
+            f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return ACCOUNT
@@ -221,7 +239,7 @@ async def cashout_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{get_emoji('withdraw')} *CASHOUT REQUEST* #{withdrawal_id}\n\n"
         f"{get_emoji('user')} User: {user.first_name} (@{user.username or 'N/A'})\n"
         f"{get_emoji('id')} ID: `{telegram_id}`\n"
-        f"{get_emoji('money')} Amount: `{amount}` ETB\n"
+        f"{get_emoji('money')} Amount: `{amount:.2f}` ETB\n"
         f"{get_emoji('bank')} Method: `{method}`\n"
         f"{get_emoji('phone')} Account: `{account}`\n\n"
         f"{get_emoji('info')} Commands:\n"
@@ -244,7 +262,7 @@ async def cashout_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    logger.info(f"Cashout request #{withdrawal_id} from {telegram_id}: {amount} ETB via {method}")
+    logger.info(f"Cashout request #{withdrawal_id} from {telegram_id}: {amount:.2f} ETB via {method}")
     
     # Clear flow data
     context.user_data.clear()
@@ -259,7 +277,8 @@ async def cashout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user.get('lang', 'en') if user else 'en'
     
     await update.message.reply_text(
-        f"{get_emoji('warning')} Withdrawal cancelled.",
+        f"{get_emoji('warning')} Withdrawal cancelled.\n\n"
+        f"You can start a new withdrawal anytime from the main menu.",
         reply_markup=menu(lang),
         parse_mode='Markdown'
     )
@@ -268,23 +287,22 @@ async def cashout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==================== BACKWARD COMPATIBILITY ALIASES ====================
-# These allow older code to import the same functions by different names
 handle_cashout_amount = cashout_amount
 handle_cashout_account = cashout_account
-cashout_method = cashout_callback  # ← ADDED: Alias for cashout_callback
+cashout_method = cashout_callback
 
 
-# Export all
+# ==================== EXPORTS ====================
 __all__ = [
     'cashout',
     'cashout_callback',
-    'cashout_method',        # ← ADDED: Alias for backward compatibility
+    'cashout_method',
     'cashout_amount',
     'cashout_account',
     'cashout_cancel',
     'handle_cashout_amount',
     'handle_cashout_account',
-    'AMOUNT',
     'METHOD',
+    'AMOUNT',
     'ACCOUNT',
 ]
