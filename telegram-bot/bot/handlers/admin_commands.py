@@ -1,5 +1,5 @@
 # telegram-bot/bot/handlers/admin_commands.py
-# Estif Bingo 24/7 - Complete Admin Commands Handler
+# Estif Bingo 24/7 - Complete Admin Commands Handler (UPDATED)
 
 import logging
 from datetime import datetime, timedelta
@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackContext
 from telegram.constants import ParseMode
 
-from bot.db.database import database
+from bot.db.database import Database
 from bot.config import config
 from bot.utils import logger, log_user_action
 from bot.keyboards.menu import admin_keyboard, back_button
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 def is_admin(user_id: int) -> bool:
     """Check if user is admin"""
     return str(user_id) == str(config.ADMIN_CHAT_ID)
+
 
 # ==================== MAIN ADMIN COMMAND ====================
 
@@ -40,16 +41,16 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = admin_keyboard()
     
     # Get statistics for dashboard
-    total_users = await database.get_total_users_count()
-    pending_withdrawals = await database.get_pending_withdrawals()
-    pending_deposits = []  # Would need a deposits table
+    total_users = await Database.get_total_users_count()
+    pending_withdrawals = await Database.get_pending_withdrawals()
+    win_percentage = await Database.get_win_percentage()
     
     welcome_msg = (
         f"{get_emoji('settings')} <b>ADMIN PANEL</b> {get_emoji('settings')}\n\n"
         f"{get_emoji('stats')} <b>Statistics:</b>\n"
         f"• Total Users: <code>{total_users}</code>\n"
         f"• Pending Withdrawals: <code>{len(pending_withdrawals)}</code>\n"
-        f"• Current Win %: <code>{await database.get_win_percentage()}%</code>\n\n"
+        f"• Current Win %: <code>{win_percentage}%</code>\n\n"
         f"{get_emoji('info')} Select an option below:"
     )
     
@@ -58,6 +59,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
+
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin panel callback queries"""
@@ -90,14 +92,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "admin_back":
         await admin_panel(update, context)
 
+
 async def show_dashboard(query, context: ContextTypes.DEFAULT_TYPE):
     """Show admin dashboard"""
-    total_users = await database.get_total_users_count()
+    total_users = await Database.get_total_users_count()
     active_today = await get_active_users_today()
-    total_deposits = await database.get_total_deposits()
+    total_deposits = await Database.get_total_deposits()
     total_withdrawals = await get_total_withdrawals()
-    pending_withdrawals = await database.get_pending_withdrawals()
-    win_percentage = await database.get_win_percentage()
+    pending_withdrawals = await Database.get_pending_withdrawals()
+    win_percentage = await Database.get_win_percentage()
     
     dashboard_msg = (
         f"{get_emoji('stats')} <b>DASHBOARD</b> {get_emoji('stats')}\n\n"
@@ -126,6 +129,7 @@ async def show_dashboard(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+
 async def show_users_panel(query, context: ContextTypes.DEFAULT_TYPE):
     """Show users management panel"""
     keyboard = InlineKeyboardMarkup([
@@ -142,13 +146,15 @@ async def show_users_panel(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+
 async def show_pending_deposits(query, context: ContextTypes.DEFAULT_TYPE):
-    """Show pending deposits (placeholder - implement based on your deposit system)"""
+    """Show pending deposits"""
     await query.edit_message_text(
         f"{get_emoji('pending')} <b>PENDING DEPOSITS</b>\n\n"
         f"Deposit approval is handled via /approve_deposit command.\n\n"
         f"Usage: <code>/approve_deposit USER_ID AMOUNT</code>\n"
         f"Example: <code>/approve_deposit 123456789 100</code>\n\n"
+        f"{get_emoji('info')} To reject: <code>/reject_deposit USER_ID [reason]</code>\n\n"
         f"{get_emoji('back')} Use /admin to return.",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[
@@ -156,19 +162,27 @@ async def show_pending_deposits(query, context: ContextTypes.DEFAULT_TYPE):
         ]])
     )
 
+
 async def show_pending_withdrawals(query, context: ContextTypes.DEFAULT_TYPE):
     """Show pending withdrawals"""
-    pending = await database.get_pending_withdrawals()
+    pending = await Database.get_pending_withdrawals()
     
     if not pending:
         msg = f"{get_emoji('success')} <b>No pending withdrawals!</b>\n\nAll withdrawal requests have been processed."
     else:
         msg = f"{get_emoji('pending')} <b>PENDING WITHDRAWALS ({len(pending)})</b>\n\n"
-        for w in pending[:10]:  # Show first 10
+        for w in pending[:10]:
+            amount = float(w['amount']) if w['amount'] else 0
+            requested_at = w['requested_at']
+            if isinstance(requested_at, datetime):
+                requested_str = requested_at.strftime('%Y-%m-%d %H:%M')
+            else:
+                requested_str = str(requested_at)
+            
             msg += (
                 f"• ID: <code>{w['id']}</code> | User: <code>{w['telegram_id']}</code>\n"
-                f"  Amount: <code>{float(w['amount']):.2f} ETB</code> | Method: {w['method']}\n"
-                f"  Requested: {w['requested_at'].strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"  Amount: <code>{amount:.2f} ETB</code> | Method: {w['method']}\n"
+                f"  Requested: {requested_str}\n\n"
             )
         
         if len(pending) > 10:
@@ -186,6 +200,7 @@ async def show_pending_withdrawals(query, context: ContextTypes.DEFAULT_TYPE):
         ]])
     )
 
+
 async def show_reports_panel(query, context: ContextTypes.DEFAULT_TYPE):
     """Show reports panel"""
     keyboard = InlineKeyboardMarkup([
@@ -202,9 +217,10 @@ async def show_reports_panel(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+
 async def show_settings_panel(query, context: ContextTypes.DEFAULT_TYPE):
     """Show settings panel"""
-    current_win = await database.get_win_percentage()
+    current_win = await Database.get_win_percentage()
     
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"{get_emoji('target')} Set Win % (70)", callback_data="set_win_70")],
@@ -223,6 +239,7 @@ async def show_settings_panel(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+
 # ==================== WIN PERCENTAGE COMMANDS ====================
 
 async def set_win_percentage(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,7 +247,7 @@ async def set_win_percentage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command.")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command.", parse_mode=ParseMode.HTML)
         return
     
     if len(context.args) < 1:
@@ -253,8 +270,8 @@ async def set_win_percentage(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         
-        old_percentage = await database.get_win_percentage()
-        await database.set_win_percentage(percentage)
+        old_percentage = await Database.get_win_percentage()
+        await Database.set_win_percentage(percentage)
         
         await update.message.reply_text(
             f"{get_emoji('success')} <b>Win Percentage Updated!</b>\n\n"
@@ -271,6 +288,7 @@ async def set_win_percentage(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode=ParseMode.HTML
         )
 
+
 # ==================== STATS COMMAND ====================
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -278,15 +296,15 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command.")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command.", parse_mode=ParseMode.HTML)
         return
     
-    total_users = await database.get_total_users_count()
+    total_users = await Database.get_total_users_count()
     active_today = await get_active_users_today()
-    total_deposits = await database.get_total_deposits()
+    total_deposits = await Database.get_total_deposits()
     total_withdrawals = await get_total_withdrawals()
-    pending_withdrawals = await database.get_pending_withdrawals()
-    win_percentage = await database.get_win_percentage()
+    pending_withdrawals = await Database.get_pending_withdrawals()
+    win_percentage = await Database.get_win_percentage()
     
     stats_msg = (
         f"{get_emoji('stats')} <b>BOT STATISTICS</b> {get_emoji('stats')}\n\n"
@@ -307,6 +325,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(stats_msg, parse_mode=ParseMode.HTML)
 
+
 # ==================== DEPOSIT COMMANDS ====================
 
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -314,7 +333,7 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command", parse_mode=ParseMode.HTML)
         return
     
     if len(context.args) < 2:
@@ -330,16 +349,16 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         telegram_id = int(context.args[0])
         amount = float(context.args[1])
         
-        user_before = await database.get_user(telegram_id)
+        user_before = await Database.get_user(telegram_id)
         if not user_before:
-            await update.message.reply_text(f"{get_emoji('error')} User {telegram_id} not found")
+            await update.message.reply_text(f"{get_emoji('error')} User {telegram_id} not found", parse_mode=ParseMode.HTML)
             return
         
         old_balance = float(user_before.get("balance", 0))
         
-        await database.add_balance(telegram_id, amount, "deposit_approval")
+        await Database.add_balance(telegram_id, amount, "deposit_approval")
         
-        user_after = await database.get_user(telegram_id)
+        user_after = await Database.get_user(telegram_id)
         new_balance = float(user_after.get("balance", 0))
         
         lang = user_before.get('lang', 'en')
@@ -353,15 +372,16 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"{get_emoji('success')} Deposit approved for user {telegram_id}\n"
             f"💰 Amount: {amount} ETB\n"
-            f"📊 Balance: {old_balance:.2f} → {new_balance:.2f} ETB"
+            f"📊 Balance: {old_balance:.2f} → {new_balance:.2f} ETB",
+            parse_mode=ParseMode.HTML
         )
         
         logger.info(f"Deposit approved: {telegram_id} - {amount} ETB")
         
     except ValueError:
-        await update.message.reply_text(f"{get_emoji('error')} Invalid USER_ID or AMOUNT format")
+        await update.message.reply_text(f"{get_emoji('error')} Invalid USER_ID or AMOUNT format", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}")
+        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}", parse_mode=ParseMode.HTML)
 
 
 async def reject_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,7 +389,7 @@ async def reject_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command", parse_mode=ParseMode.HTML)
         return
     
     if len(context.args) < 1:
@@ -385,7 +405,7 @@ async def reject_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         telegram_id = int(context.args[0])
         reason = ' '.join(context.args[1:]) if len(context.args) > 1 else "Not specified"
         
-        user = await database.get_user(telegram_id)
+        user = await Database.get_user(telegram_id)
         if user:
             lang = user.get('lang', 'en')
             await context.bot.send_message(
@@ -394,13 +414,17 @@ async def reject_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML
             )
         
-        await update.message.reply_text(f"{get_emoji('success')} Deposit rejected for user {telegram_id}")
+        await update.message.reply_text(
+            f"{get_emoji('success')} Deposit rejected for user {telegram_id}\nReason: {reason}",
+            parse_mode=ParseMode.HTML
+        )
         logger.info(f"Deposit rejected: {telegram_id} - Reason: {reason}")
         
     except ValueError:
-        await update.message.reply_text(f"{get_emoji('error')} Invalid USER_ID format")
+        await update.message.reply_text(f"{get_emoji('error')} Invalid USER_ID format", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}")
+        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}", parse_mode=ParseMode.HTML)
+
 
 # ==================== CASHOUT COMMANDS ====================
 
@@ -409,7 +433,7 @@ async def approve_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command", parse_mode=ParseMode.HTML)
         return
     
     if len(context.args) < 1:
@@ -424,38 +448,42 @@ async def approve_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         withdrawal_id = int(context.args[0])
         
-        withdrawal = await database.get_withdrawal_by_id(withdrawal_id)
+        withdrawal = await Database.get_withdrawal_by_id(withdrawal_id)
         if not withdrawal:
-            await update.message.reply_text(f"{get_emoji('error')} Withdrawal not found")
+            await update.message.reply_text(f"{get_emoji('error')} Withdrawal not found", parse_mode=ParseMode.HTML)
             return
         
         if withdrawal.get("status") != "pending":
-            await update.message.reply_text(f"{get_emoji('error')} Withdrawal already {withdrawal.get('status')}")
+            await update.message.reply_text(
+                f"{get_emoji('error')} Withdrawal already {withdrawal.get('status')}",
+                parse_mode=ParseMode.HTML
+            )
             return
         
         telegram_id = withdrawal["telegram_id"]
         amount = float(withdrawal["amount"])
         
-        user_before = await database.get_user(telegram_id)
+        user_before = await Database.get_user(telegram_id)
         if not user_before:
-            await update.message.reply_text(f"{get_emoji('error')} User {telegram_id} not found")
+            await update.message.reply_text(f"{get_emoji('error')} User {telegram_id} not found", parse_mode=ParseMode.HTML)
             return
         
         old_balance = float(user_before.get("balance", 0))
         
         if old_balance < amount:
             await update.message.reply_text(
-                f"{get_emoji('error')} Insufficient balance! User has {old_balance:.2f} ETB, requested {amount:.2f} ETB"
+                f"{get_emoji('error')} Insufficient balance! User has {old_balance:.2f} ETB, requested {amount:.2f} ETB",
+                parse_mode=ParseMode.HTML
             )
             return
         
-        result = await database.approve_withdrawal(withdrawal_id)
+        result = await Database.approve_withdrawal(withdrawal_id)
         
         if not result:
-            await update.message.reply_text(f"{get_emoji('error')} Failed to approve withdrawal")
+            await update.message.reply_text(f"{get_emoji('error')} Failed to approve withdrawal", parse_mode=ParseMode.HTML)
             return
         
-        user_after = await database.get_user(telegram_id)
+        user_after = await Database.get_user(telegram_id)
         new_balance = float(user_after.get("balance", 0))
         
         lang = user_before.get('lang', 'en')
@@ -470,15 +498,16 @@ async def approve_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{get_emoji('success')} Cashout approved for withdrawal #{withdrawal_id}\n"
             f"👤 User: {telegram_id}\n"
             f"💰 Amount: {amount:.2f} ETB\n"
-            f"📊 Balance: {old_balance:.2f} → {new_balance:.2f} ETB"
+            f"📊 Balance: {old_balance:.2f} → {new_balance:.2f} ETB",
+            parse_mode=ParseMode.HTML
         )
         
         logger.info(f"Cashout approved: withdrawal #{withdrawal_id} - {amount:.2f} ETB")
         
     except ValueError:
-        await update.message.reply_text(f"{get_emoji('error')} Invalid WITHDRAWAL_ID format")
+        await update.message.reply_text(f"{get_emoji('error')} Invalid WITHDRAWAL_ID format", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}")
+        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}", parse_mode=ParseMode.HTML)
 
 
 async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -486,7 +515,7 @@ async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text(f"{get_emoji('error')} Admin only command")
+        await update.message.reply_text(f"{get_emoji('error')} Admin only command", parse_mode=ParseMode.HTML)
         return
     
     if len(context.args) < 1:
@@ -502,12 +531,12 @@ async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         withdrawal_id = int(context.args[0])
         reason = ' '.join(context.args[1:]) if len(context.args) > 1 else "Not specified"
         
-        withdrawal = await database.get_withdrawal_by_id(withdrawal_id)
+        withdrawal = await Database.get_withdrawal_by_id(withdrawal_id)
         
         if withdrawal:
-            await database.reject_withdrawal(withdrawal_id)
+            await Database.reject_withdrawal(withdrawal_id)
             
-            user = await database.get_user(withdrawal["telegram_id"])
+            user = await Database.get_user(withdrawal["telegram_id"])
             if user:
                 lang = user.get('lang', 'en')
                 await context.bot.send_message(
@@ -516,22 +545,26 @@ async def reject_cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML
                 )
             
-            await update.message.reply_text(f"{get_emoji('success')} Cashout rejected for withdrawal #{withdrawal_id}")
+            await update.message.reply_text(
+                f"{get_emoji('success')} Cashout rejected for withdrawal #{withdrawal_id}\nReason: {reason}",
+                parse_mode=ParseMode.HTML
+            )
             logger.info(f"Cashout rejected: withdrawal #{withdrawal_id} - Reason: {reason}")
         else:
-            await update.message.reply_text(f"{get_emoji('error')} Withdrawal #{withdrawal_id} not found")
+            await update.message.reply_text(f"{get_emoji('error')} Withdrawal #{withdrawal_id} not found", parse_mode=ParseMode.HTML)
         
     except ValueError:
-        await update.message.reply_text(f"{get_emoji('error')} Invalid WITHDRAWAL_ID format")
+        await update.message.reply_text(f"{get_emoji('error')} Invalid WITHDRAWAL_ID format", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}")
+        await update.message.reply_text(f"{get_emoji('error')} Error: {str(e)}", parse_mode=ParseMode.HTML)
+
 
 # ==================== HELPER FUNCTIONS ====================
 
 async def get_active_users_today() -> int:
     """Get number of active users today"""
     try:
-        async with database._pool.acquire() as conn:
+        async with Database._pool.acquire() as conn:
             count = await conn.fetchval("""
                 SELECT COUNT(DISTINCT telegram_id)
                 FROM game_transactions
@@ -541,10 +574,11 @@ async def get_active_users_today() -> int:
     except Exception:
         return 0
 
+
 async def get_total_withdrawals() -> float:
     """Get total approved withdrawals"""
     try:
-        async with database._pool.acquire() as conn:
+        async with Database._pool.acquire() as conn:
             total = await conn.fetchval("""
                 SELECT COALESCE(SUM(amount), 0)
                 FROM pending_withdrawals
@@ -553,6 +587,7 @@ async def get_total_withdrawals() -> float:
             return float(total or 0)
     except Exception:
         return 0.0
+
 
 # ==================== EXPORTS ====================
 

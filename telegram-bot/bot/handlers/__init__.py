@@ -1,5 +1,5 @@
 # telegram-bot/bot/handlers/__init__.py
-# Estif Bingo 24/7 - All Handlers Exports (UPDATED - Added verify_otp)
+# Estif Bingo 24/7 - Complete Handlers Exports (FULLY UPDATED & FIXED)
 
 # ==================== CORE HANDLERS ====================
 from .start import start, language_callback
@@ -7,7 +7,7 @@ from .register import register, handle_contact, register_phone, register_cancel,
 from .balance import balance
 from .invite import invite
 from .contact import contact_center
-from .bingo_otp import bingo_otp, verify_otp  # ← ADDED verify_otp
+from .bingo_otp import bingo_otp, verify_otp
 
 # ==================== FINANCIAL HANDLERS ====================
 from .deposit import (
@@ -25,7 +25,6 @@ from .cashout import (
     cashout_amount, 
     cashout_account, 
     cashout_cancel,
-    METHOD, 
     AMOUNT as CASHOUT_AMOUNT, 
     ACCOUNT
 )
@@ -41,7 +40,7 @@ from .transfer import (
     transfer_add_amount,
     transfer_subtract_amount,
     PHONE_NUMBER,
-    AMOUNT,
+    AMOUNT as TRANSFER_AMOUNT,
     CONFIRM
 )
 
@@ -57,18 +56,17 @@ from .admin_commands import (
     stats_command
 )
 
-# ==================== GAME HANDLERS (NO quick_play_callback) ====================
+# ==================== GAME HANDLERS ====================
 from .game import (
-    play_command,           # Main /play command handler
-    game_callback,          # Web app data callback handler
-    stats_callback,         # Player statistics handler
-    leaderboard_callback,   # Leaderboard display handler
-    back_to_game_callback,  # Back to game navigation handler
-    start_game_handlers     # Background task initializer
+    play_command,
+    game_callback,
+    stats_callback,
+    leaderboard_callback,
+    back_to_game_callback,
+    start_game_handlers
 )
 
 # ==================== LEGACY PLAY HANDLER (DEPRECATED) ====================
-# Keeping for backward compatibility - points to new play_command
 from .register import play as legacy_play
 
 # ==================== EXPORTS ====================
@@ -85,7 +83,7 @@ __all__ = [
     'invite',
     'contact_center',
     'bingo_otp',
-    'verify_otp',           # ← ADDED verify_otp
+    'verify_otp',
     'legacy_play',
     'play',
     
@@ -102,7 +100,6 @@ __all__ = [
     'cashout_amount',
     'cashout_account',
     'cashout_cancel',
-    'METHOD',
     'CASHOUT_AMOUNT',
     'ACCOUNT',
     
@@ -116,7 +113,7 @@ __all__ = [
     'transfer_add_amount',
     'transfer_subtract_amount',
     'PHONE_NUMBER',
-    'AMOUNT',
+    'TRANSFER_AMOUNT',
     'CONFIRM',
     
     # Admin handlers
@@ -129,7 +126,7 @@ __all__ = [
     'set_win_percentage',
     'stats_command',
     
-    # Game handlers (NO quick_play_callback)
+    # Game handlers
     'play_command',
     'game_callback',
     'stats_callback',
@@ -149,7 +146,7 @@ def get_all_handlers():
         'invite': invite,
         'contact_center': contact_center,
         'bingo_otp': bingo_otp,
-        'verify_otp': verify_otp,  # ← ADDED verify_otp
+        'verify_otp': verify_otp,
         'deposit': deposit,
         'cashout': cashout,
         'transfer': transfer,
@@ -193,7 +190,7 @@ HANDLERS_INFO = {
     'commands': [
         ('start', 'Start the bot and see welcome message'),
         ('register', 'Register with your phone number'),
-        ('balance', 'Check your current balance'),
+        ('balance', 'Check your current balance and game statistics'),
         ('deposit', 'Add funds to your account'),
         ('cashout', 'Withdraw your winnings'),
         ('transfer', 'Transfer funds to another player'),
@@ -201,21 +198,32 @@ HANDLERS_INFO = {
         ('invite', 'Get your referral link'),
         ('contact', 'Contact support'),
         ('bingo_otp', 'Get OTP for game access'),
-        ('verify', 'Verify OTP code'),  # ← ADDED verify command info
+        ('verify', 'Verify OTP code'),
     ],
     'admin_commands': [
         ('admin', 'Admin control panel'),
-        ('approve_deposit', 'Approve deposit'),
-        ('reject_deposit', 'Reject deposit'),
-        ('approve_cashout', 'Approve withdrawal'),
-        ('reject_cashout', 'Reject withdrawal'),
+        ('approve_deposit', 'Approve deposit request'),
+        ('reject_deposit', 'Reject deposit request'),
+        ('approve_cashout', 'Approve withdrawal request'),
+        ('reject_cashout', 'Reject withdrawal request'),
         ('stats', 'View bot statistics'),
-        ('setwin', 'Set win percentage'),
+        ('setwin', 'Set win percentage (70,75,76,80)'),
     ],
     'game_features': [
         'Web App Bingo Game',
         'Live Statistics',
         'Leaderboard',
         'Auto-balance updates',
-    ]
+        'Multi-device sync',
+    ],
+    'conversation_flows': [
+        ('Deposit', 'Method → Amount → Screenshot'),
+        ('Cashout', 'Method → Amount → Account'),
+        ('Transfer', 'Phone → Amount → Confirm'),
+        ('Register', 'Phone number entry'),
+    ],
 }
+
+# ==================== VERSION INFO ====================
+HANDLERS_VERSION = "3.0.0"
+HANDLERS_AUTHOR = "Estif Bingo Team"

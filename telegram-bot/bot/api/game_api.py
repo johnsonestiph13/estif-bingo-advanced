@@ -1,8 +1,9 @@
 """
 Estif Bingo 24/7 - Game API Endpoints for Telegram Bot
 Handles all game-related API calls from the Node.js game server
-Updated: Added transfer endpoints, better error handling, and enhanced features
+Updated: Fixed database pool reference, added error handling, and enhanced features
 """
+
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import jwt
@@ -17,11 +18,12 @@ from functools import wraps
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bot.db.database import database
-from bot.config import Config
+from bot.db.database import Database
+from bot.config import config
 
 # Create blueprint
 game_api_bp = Blueprint('game_api', __name__)
+
 
 # ==================== HELPER: Run async functions in Flask ====================
 
@@ -40,6 +42,7 @@ def run_async(async_func, *args, **kwargs):
         except Exception:
             pass
 
+
 # ==================== AUTHENTICATION DECORATOR ====================
 
 def verify_api_key(f):
@@ -49,11 +52,12 @@ def verify_api_key(f):
         api_key = request.headers.get('X-API-Key')
         if not api_key:
             return jsonify({'error': 'Missing API key'}), 401
-        if api_key != Config.API_SECRET:
+        if api_key != config.API_SECRET:
             print(f"Invalid API key attempt: {api_key[:20]}...")
             return jsonify({'error': 'Unauthorized: Invalid API key'}), 401
         return f(*args, **kwargs)
     return decorated_function
+
 
 # ==================== AUTHENTICATION ENDPOINTS ====================
 
@@ -70,10 +74,10 @@ def verify_code():
         if not code:
             return jsonify({'success': False, 'error': 'Code required'}), 400
         
-        telegram_id = run_async(database.verify_auth_code, code)
+        telegram_id = run_async(Database.verify_auth_code, code)
         
         if telegram_id:
-            user = run_async(database.get_user, telegram_id)
+            user = run_async(Database.get_user, telegram_id)
             if user:
                 return jsonify({
                     'success': True,
@@ -86,6 +90,7 @@ def verify_code():
     except Exception as e:
         print(f"Verify code error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/exchange-code', methods=['POST'])
 @verify_api_key
@@ -100,19 +105,19 @@ def exchange_code():
         if not code:
             return jsonify({'success': False, 'error': 'Code required'}), 400
         
-        telegram_id = run_async(database.verify_auth_code, code)
+        telegram_id = run_async(Database.verify_auth_code, code)
         
         if telegram_id:
-            user = run_async(database.get_user, telegram_id)
+            user = run_async(Database.get_user, telegram_id)
             if user:
                 # Generate JWT token for game server
                 token = jwt.encode({
                     'telegram_id': telegram_id,
                     'username': user.get('username', 'Player'),
                     'balance': float(user.get('balance', 0)),
-                    'exp': datetime.utcnow() + timedelta(hours=2),
+                    'exp': datetime.utcnow() + timedelta(hours=config.JWT_EXPIRY_HOURS),
                     'iat': datetime.utcnow()
-                }, Config.JWT_SECRET, algorithm='HS256')
+                }, config.JWT_SECRET, algorithm='HS256')
                 
                 return jsonify({
                     'success': True,
@@ -132,6 +137,7 @@ def exchange_code():
         print(f"Exchange code error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 @game_api_bp.route('/api/verify-token', methods=['POST'])
 @verify_api_key
 def verify_token():
@@ -145,10 +151,10 @@ def verify_token():
         if not token:
             return jsonify({'valid': False, 'message': 'Token required'}), 400
         
-        decoded = jwt.decode(token, Config.JWT_SECRET, algorithms=['HS256'])
+        decoded = jwt.decode(token, config.JWT_SECRET, algorithms=['HS256'])
         
         # Verify user still exists and is registered
-        user = run_async(database.get_user, decoded['telegram_id'])
+        user = run_async(Database.get_user, decoded['telegram_id'])
         if not user or not user.get('registered'):
             return jsonify({'valid': False, 'message': 'User not found or not registered'}), 401
         
@@ -166,6 +172,7 @@ def verify_token():
         print(f"Verify token error: {e}")
         return jsonify({'valid': False, 'message': 'Internal server error'}), 500
 
+
 # ==================== BALANCE OPERATIONS ====================
 
 @game_api_bp.route('/api/deduct', methods=['POST'])
@@ -178,7 +185,7 @@ def deduct_balance():
             return jsonify({'success': False, 'error': 'Invalid request body'}), 400
         
         telegram_id = data.get('telegram_id')
-        amount = data.get('amount', Config.CARTELA_PRICE)
+        amount = data.get('amount', config.CARTELA_PRICE)
         cartela_id = data.get('cartela_id')
         round_num = data.get('round')
         reason = data.get('reason', f'Cartela {cartela_id} selection')
@@ -187,17 +194,17 @@ def deduct_balance():
             return jsonify({'success': False, 'error': 'telegram_id required'}), 400
         
         # Check current balance
-        current_balance = run_async(database.get_balance, telegram_id)
+        current_balance = run_async(Database.get_balance, telegram_id)
         if current_balance < amount:
             return jsonify({
                 'success': False,
                 'error': f'Insufficient balance: {current_balance:.2f} ETB. Need {amount:.2f} ETB'
             }), 400
         
-        success = run_async(database.update_balance, telegram_id, -amount, 'cartela_purchase', round_num)
+        success = run_async(Database.update_balance, telegram_id, -amount, 'cartela_purchase', round_num)
         
         if success:
-            user = run_async(database.get_user, telegram_id)
+            user = run_async(Database.get_user, telegram_id)
             new_balance = float(user['balance']) if user else 0
             return jsonify({
                 'success': True,
@@ -212,6 +219,7 @@ def deduct_balance():
     except Exception as e:
         print(f"Deduct balance error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/add', methods=['POST'])
 @verify_api_key
@@ -233,10 +241,10 @@ def add_balance():
         if not amount or amount <= 0:
             return jsonify({'success': False, 'error': 'Valid amount required'}), 400
         
-        success = run_async(database.update_balance, telegram_id, amount, 'winning', round_id)
+        success = run_async(Database.update_balance, telegram_id, amount, 'winning', round_id)
         
         if success:
-            user = run_async(database.get_user, telegram_id)
+            user = run_async(Database.get_user, telegram_id)
             new_balance = float(user['balance']) if user else 0
             return jsonify({
                 'success': True,
@@ -249,23 +257,25 @@ def add_balance():
         print(f"Add balance error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 @game_api_bp.route('/api/balance/<int:telegram_id>', methods=['GET'])
 @verify_api_key
 def get_balance(telegram_id):
     """Get user balance"""
     try:
-        user = run_async(database.get_user, telegram_id)
+        user = run_async(Database.get_user, telegram_id)
         if user:
             balance = float(user.get('balance', 0))
             return jsonify({
                 'success': True,
                 'balance': balance,
-                'can_play': balance >= Config.MIN_BALANCE_FOR_PLAY
+                'can_play': balance >= config.MIN_BALANCE_FOR_PLAY
             })
         return jsonify({'success': False, 'error': 'User not found'}), 404
     except Exception as e:
         print(f"Get balance error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/balance', methods=['POST'])
 @verify_api_key
@@ -280,18 +290,19 @@ def get_balance_post():
         if not telegram_id:
             return jsonify({'success': False, 'error': 'telegram_id required'}), 400
         
-        user = run_async(database.get_user, telegram_id)
+        user = run_async(Database.get_user, telegram_id)
         if user:
             balance = float(user.get('balance', 0))
             return jsonify({
                 'success': True,
                 'balance': balance,
-                'can_play': balance >= Config.MIN_BALANCE_FOR_PLAY
+                'can_play': balance >= config.MIN_BALANCE_FOR_PLAY
             })
         return jsonify({'success': False, 'error': 'User not found'}), 404
     except Exception as e:
         print(f"Get balance error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/adjust-balance', methods=['POST'])
 @verify_api_key
@@ -309,10 +320,10 @@ def adjust_balance():
         if not telegram_id or amount is None:
             return jsonify({'success': False, 'error': 'telegram_id and amount required'}), 400
         
-        success = run_async(database.update_balance, telegram_id, amount, 'admin_adjustment', None)
+        success = run_async(Database.update_balance, telegram_id, amount, 'admin_adjustment', None)
         
         if success:
-            user = run_async(database.get_user, telegram_id)
+            user = run_async(Database.get_user, telegram_id)
             new_balance = float(user['balance']) if user else 0
             return jsonify({
                 'success': True,
@@ -324,6 +335,7 @@ def adjust_balance():
     except Exception as e:
         print(f"Adjust balance error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 # ==================== TRANSFER OPERATIONS ====================
 
@@ -348,7 +360,7 @@ def transfer_balance():
             return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
         
         # Check sender balance
-        sender_balance = run_async(database.get_balance, from_id)
+        sender_balance = run_async(Database.get_balance, from_id)
         if sender_balance < amount:
             return jsonify({
                 'success': False,
@@ -356,16 +368,16 @@ def transfer_balance():
             }), 400
         
         # Perform transfer
-        run_async(database.deduct_balance, from_id, amount, f"Transfer to {to_id}: {reason}")
-        run_async(database.add_balance, to_id, amount, f"Transfer from {from_id}: {reason}")
+        run_async(Database.deduct_balance, from_id, amount, f"Transfer to {to_id}: {reason}")
+        run_async(Database.add_balance, to_id, amount, f"Transfer from {from_id}: {reason}")
         
         # Get updated balances
-        new_sender_balance = run_async(database.get_balance, from_id)
-        new_receiver_balance = run_async(database.get_balance, to_id)
+        new_sender_balance = run_async(Database.get_balance, from_id)
+        new_receiver_balance = run_async(Database.get_balance, to_id)
         
         # Log transactions
-        run_async(database.log_game_transaction, from_id, None, "transfer_out", -amount, None, None, f"Transfer to {to_id}")
-        run_async(database.log_game_transaction, to_id, None, "transfer_in", amount, None, None, f"Transfer from {from_id}")
+        run_async(Database.log_game_transaction, from_id, None, "transfer_out", -amount, None, None, f"Transfer to {to_id}")
+        run_async(Database.log_game_transaction, to_id, None, "transfer_in", amount, None, None, f"Transfer from {from_id}")
         
         return jsonify({
             'success': True,
@@ -384,6 +396,7 @@ def transfer_balance():
         print(f"Transfer error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 # ==================== COMMISSION / WIN PERCENTAGE ====================
 
 @game_api_bp.route('/api/commission', methods=['GET'])
@@ -391,20 +404,21 @@ def transfer_balance():
 def get_commission():
     """Get current win percentage"""
     try:
-        percentage = run_async(database.get_win_percentage)
+        percentage = run_async(Database.get_win_percentage)
         return jsonify({
             'success': True,
             'percentage': percentage,
-            'available': Config.WIN_PERCENTAGES,
-            'default': Config.DEFAULT_WIN_PERCENTAGE
+            'available': config.WIN_PERCENTAGES,
+            'default': config.DEFAULT_WIN_PERCENTAGE
         })
     except Exception as e:
         print(f"Get commission error: {e}")
         return jsonify({
             'success': True,
-            'percentage': Config.DEFAULT_WIN_PERCENTAGE,
-            'available': Config.WIN_PERCENTAGES
+            'percentage': config.DEFAULT_WIN_PERCENTAGE,
+            'available': config.WIN_PERCENTAGES
         }), 500
+
 
 @game_api_bp.route('/api/commission', methods=['POST'])
 @verify_api_key
@@ -417,14 +431,14 @@ def set_commission():
         
         percentage = data.get('percentage')
         
-        if percentage not in Config.WIN_PERCENTAGES:
+        if percentage not in config.WIN_PERCENTAGES:
             return jsonify({
                 'success': False,
-                'error': f'Invalid percentage. Allowed: {Config.WIN_PERCENTAGES}'
+                'error': f'Invalid percentage. Allowed: {config.WIN_PERCENTAGES}'
             }), 400
         
-        previous = run_async(database.get_win_percentage)
-        run_async(database.set_win_percentage, percentage)
+        previous = run_async(Database.get_win_percentage)
+        run_async(Database.set_win_percentage, percentage)
         
         return jsonify({
             'success': True,
@@ -436,6 +450,7 @@ def set_commission():
         print(f"Set commission error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 # ==================== USER MANAGEMENT ====================
 
 @game_api_bp.route('/api/get-user/<int:telegram_id>', methods=['GET'])
@@ -443,7 +458,7 @@ def set_commission():
 def get_user(telegram_id):
     """Get user details by Telegram ID"""
     try:
-        user = run_async(database.get_user, telegram_id)
+        user = run_async(Database.get_user, telegram_id)
         
         if user:
             user_dict = dict(user)
@@ -461,6 +476,7 @@ def get_user(telegram_id):
     except Exception as e:
         print(f"Get user error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/get-user', methods=['POST'])
 @verify_api_key
@@ -475,7 +491,7 @@ def get_user_post():
         if not telegram_id:
             return jsonify({'success': False, 'error': 'telegram_id required'}), 400
         
-        user = run_async(database.get_user, telegram_id)
+        user = run_async(Database.get_user, telegram_id)
         
         if user:
             user_dict = dict(user)
@@ -493,6 +509,7 @@ def get_user_post():
     except Exception as e:
         print(f"Get user error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 
 @game_api_bp.route('/api/search-players', methods=['POST'])
 @verify_api_key
@@ -511,7 +528,7 @@ def search_players():
                 'error': 'Search term must be at least 2 characters'
             }), 400
         
-        players = run_async(database.search_players, search_term)
+        players = run_async(Database.search_players, search_term)
         
         players_list = []
         for player in players:
@@ -531,18 +548,19 @@ def search_players():
         print(f"Search players error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 @game_api_bp.route('/api/player-stats/<int:telegram_id>', methods=['GET'])
 @verify_api_key
 def get_player_stats(telegram_id):
     """Get player statistics"""
     try:
-        user = run_async(database.get_user, telegram_id)
+        user = run_async(Database.get_user, telegram_id)
         
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 404
         
         async def get_stats():
-            async with database.pool.acquire() as conn:
+            async with Database._pool.acquire() as conn:
                 total_bets = await conn.fetchval("""
                     SELECT COALESCE(SUM(amount), 0) FROM game_transactions 
                     WHERE telegram_id = $1 AND type = 'bet'
@@ -587,6 +605,7 @@ def get_player_stats(telegram_id):
         print(f"Get player stats error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 # ==================== ROUND MANAGEMENT ====================
 
 @game_api_bp.route('/api/save-round', methods=['POST'])
@@ -604,7 +623,7 @@ def save_round():
                 return jsonify({'success': False, 'error': f'Missing field: {field}'}), 400
         
         async def save():
-            async with database.pool.acquire() as conn:
+            async with Database._pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO game_rounds (round_number, total_pool, winner_reward, admin_commission, winners, win_percentage)
                     VALUES ($1, $2, $3, $4, $5, $6)
@@ -618,13 +637,14 @@ def save_round():
         print(f"Save round error: {e}")
         return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
 # ==================== HEALTH CHECK ====================
 
 @game_api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint for Render"""
     try:
-        db_connected = run_async(database.health_check)
+        db_connected = run_async(Database.health_check)
         
         return jsonify({
             'status': 'alive',
@@ -641,6 +661,7 @@ def health_check():
             'service': 'telegram-bot-api'
         }), 500
 
+
 @game_api_bp.route('/api/bridge-health', methods=['GET'])
 @verify_api_key
 def bridge_health():
@@ -655,15 +676,18 @@ def bridge_health():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
 # ==================== ERROR HANDLERS ====================
 
 @game_api_bp.errorhandler(401)
 def unauthorized(error):
     return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
+
 @game_api_bp.errorhandler(404)
 def not_found(error):
     return jsonify({'success': False, 'error': 'Endpoint not found'}), 404
+
 
 @game_api_bp.errorhandler(500)
 def internal_error(error):

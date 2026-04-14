@@ -29,18 +29,18 @@ bcrypt==4.1.1
 # Advanced Encryption
 cryptography==41.0.7
 
-# ==================== ASYNC & PERFORMANCE ====================
-# High-performance async event loop
-uvloop==0.19.0
+# ==================== ASYNC & PERFORMANCE (Optional - improves performance) ====================
+# High-performance async event loop (Linux/Mac only - Windows will skip)
+# uvloop==0.19.0
 
 # Nest asyncio for running async in sync code
-nest-asyncio==1.5.8
+# nest-asyncio==1.5.8
 
 # ==================== HTTP & NETWORK ====================
 # HTTP Requests
 requests==2.31.0
-httpx==0.25.2  # Modern async HTTP client
-aiohttp==3.9.1  # Async HTTP client
+httpx==0.25.2
+aiohttp==3.9.1
 
 # WebSocket Support
 websockets==12.0
@@ -62,70 +62,73 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # JSON Processing
-orjson==3.9.10  # Fast JSON parser
+orjson==3.9.10
 
 # Caching
 cachetools==5.3.1
 
-# Rate Limiting
-redis==5.0.1  # For distributed rate limiting (optional)
-
-# ==================== MONITORING & LOGGING ====================
+# ==================== MONITORING & LOGGING (Optional) ====================
 # System Monitoring
-psutil==5.9.6
+# psutil==5.9.6
 
 # Structured Logging
 python-json-logger==2.0.7
 
-# Sentry for Error Tracking (optional)
-# sentry-sdk==1.38.0
-
-# ==================== PAYMENT GATEWAYS (Optional) ====================
-# Stripe
-# stripe==6.5.0
-
-# Chapa (Ethiopian Payment)
-# chapa-python==1.0.0
-
-# Telebirr SDK (if available)
-# telebirr-sdk==1.0.0
-
-# ==================== DEVELOPMENT DEPENDENCIES ====================
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-
-# Code Quality
-black==23.11.0
-flake8==6.1.0
-isort==5.12.0
-mypy==1.7.0
-
-# Development Tools
-watchdog==3.0.0  # Auto-reload during development
-
-# Debugging
-ipython==8.18.1
-debugpy==1.8.0
-
 # ==================== PRODUCTION SERVER ====================
 # Production WSGI/ASGI Server
 gunicorn==21.2.0
-uvicorn==0.24.0  # For FastAPI (if needed)
 
-# ==================== DOCUMENTATION ====================
-# API Documentation (optional)
+# ASGI Server for FastAPI (optional - if using FastAPI)
+# uvicorn==0.24.0
+
+# ==================== FASTAPI (Optional - for alternative API) ====================
+# Uncomment if you want to use FastAPI instead of Flask
+# fastapi==0.104.1
+# uvicorn==0.24.0
+
+# ==================== DEVELOPMENT DEPENDENCIES (Optional - comment out for production) ====================
+# Testing
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# pytest-cov==4.1.0
+# pytest-mock==3.12.0
+
+# Code Quality
+# black==23.11.0
+# flake8==6.1.0
+# isort==5.12.0
+# mypy==1.7.0
+
+# Development Tools
+# watchdog==3.0.0
+# ipython==8.18.1
+# debugpy==1.8.0
+
+# ==================== REDIS (Optional - for distributed rate limiting) ====================
+# Uncomment if you need Redis for distributed rate limiting
+# redis==5.0.1
+
+# ==================== PAYMENT GATEWAYS (Optional) ====================
+# Uncomment if you need payment gateway integration
+# stripe==6.5.0
+# chapa-python==1.0.0
+
+# ==================== DOCUMENTATION (Optional) ====================
+# Uncomment if you need documentation generation
 # sphinx==7.2.6
 # sphinx-rtd-theme==1.3.0
 
-# ==================== COMMENTS ====================
-# Installation:
-# pip install -r requirements.txt
+# ==================== INSTALLATION NOTES ====================
+# For production deployment on Render:
+#   pip install -r requirements.txt
 #
-# For production with GPU/CUDA (if needed):
-# pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
+# For development with optional packages:
+#   pip install -r requirements.txt
+#   then uncomment optional packages you need
 #
-# For development:
-# pip install -r requirements.txt -e .
+# For minimal production (smaller footprint):
+#   pip install -r requirements.txt --no-deps
+#   then manually install only core packages
+#
+# Note: uvloop, nest-asyncio, and psutil are optional.
+# The bot works perfectly without them!

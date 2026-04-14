@@ -2,9 +2,9 @@
 # Estif Bingo 24/7 - Complete Texts Module Exports
 # Includes: Main texts, Game texts, Error messages, Emoji mappings
 
-from .locales import TEXTS
+from .locales import TEXTS, get_text, get_supported_languages, get_language_name
 
-# ==================== GAME TEXTS (NEW) ====================
+# ==================== GAME TEXTS ====================
 from .game_texts import (
     GAME_TEXTS,
     GAME_MESSAGES,
@@ -14,87 +14,11 @@ from .game_texts import (
     ADMIN_MESSAGES,
     TRANSFER_MESSAGES
 )
-from .emojis import EMOJIS
 
-# ==================== EMOJI MAPPINGS ====================
-EMOJIS = {
-    # Game emojis
-    'game': '🎮',
-    'bingo': '🎰',
-    'win': '🎉',
-    'lose': '😢',
-    'jackpot': '💰',
-    'cartela': '🎫',
-    'numbers': '🔢',
-    'dice': '🎲',
-    'trophy': '🏆',
-    'medal': '🥇',
-    'star': '⭐',
-    'lightning': '⚡',
-    'fire': '🔥',
-    'crown': '👑',
-    'gift': '🎁',
-    'bonus': '🎯',
-    
-    # Action emojis
-    'play': '▶️',
-    'pause': '⏸️',
-    'stop': '⏹️',
-    'next': '⏭️',
-    'back': '🔙',
-    'refresh': '🔄',
-    'settings': '⚙️',
-    'help': '❓',
-    'info': 'ℹ️',
-    'warning': '⚠️',
-    'error': '❌',
-    'success': '✅',
-    'question': '❓',
-    'idea': '💡',
-    
-    # Financial emojis
-    'money': '💰',
-    'deposit': '💳',
-    'withdraw': '💸',
-    'balance': '📊',
-    'transaction': '📝',
-    'bank': '🏦',
-    'phone': '📱',
-    'transfer': '🔄',
-    
-    # Status emojis
-    'pending': '⏳',
-    'approved': '✅',
-    'rejected': '❌',
-    'active': '🟢',
-    'inactive': '🔴',
-    'loading': '🔄',
-    
-    # Time emojis
-    'clock': '⏰',
-    'calendar': '📅',
-    'hourglass': '⌛',
-    
-    # Communication emojis
-    'chat': '💬',
-    'support': '📞',
-    'email': '📧',
-    'link': '🔗',
-    'notification': '🔔',
-}
+# ==================== EMOJIS ====================
+from .emojis import EMOJIS, get_emoji
 
 # ==================== HELPER FUNCTIONS ====================
-
-def get_text(key: str, lang: str = 'en', **kwargs) -> str:
-    """Get localized text by key with variable substitution"""
-    try:
-        text = TEXTS.get(lang, TEXTS['en']).get(key, TEXTS['en'].get(key, f"Missing text: {key}"))
-        if kwargs:
-            text = text.format(**kwargs)
-        return text
-    except Exception as e:
-        return f"Error loading text: {key}"
-
 
 def get_game_text(key: str, lang: str = 'en', **kwargs) -> str:
     """Get game-specific localized text"""
@@ -131,23 +55,10 @@ def get_success_message(success_type: str, lang: str = 'en', **kwargs) -> str:
 
 def format_with_emoji(text: str, emoji_key: str = None) -> str:
     """Format text with emoji prefix"""
-    if emoji_key and emoji_key in EMOJIS:
-        return f"{EMOJIS[emoji_key]} {text}"
+    if emoji_key:
+        emoji = get_emoji(emoji_key)
+        return f"{emoji} {text}"
     return text
-
-
-def get_supported_languages() -> list:
-    """Get list of supported languages"""
-    return ['en', 'am']
-
-
-def get_language_name(lang: str) -> str:
-    """Get language display name"""
-    languages = {
-        'en': 'English 🇬🇧',
-        'am': 'አማርኛ 🇪🇹'
-    }
-    return languages.get(lang, 'English')
 
 
 # ==================== TEXT CONSTANTS ====================
@@ -156,23 +67,23 @@ class TextConstants:
     """Centralized text constants for common messages"""
     
     # Common prefixes
-    ERROR_PREFIX = f"{EMOJIS['error']} Error:"
-    WARNING_PREFIX = f"{EMOJIS['warning']} Warning:"
-    SUCCESS_PREFIX = f"{EMOJIS['success']} Success:"
-    INFO_PREFIX = f"{EMOJIS['info']} Info:"
+    ERROR_PREFIX = f"{get_emoji('error')} Error:"
+    WARNING_PREFIX = f"{get_emoji('warning')} Warning:"
+    SUCCESS_PREFIX = f"{get_emoji('success')} Success:"
+    INFO_PREFIX = f"{get_emoji('info')} Info:"
     
     # Common buttons
-    BUTTON_BACK = f"{EMOJIS['back']} Back"
-    BUTTON_CANCEL = "❌ Cancel"
-    BUTTON_CONFIRM = f"{EMOJIS['success']} Confirm"
-    BUTTON_REFRESH = f"{EMOJIS['refresh']} Refresh"
-    BUTTON_HELP = f"{EMOJIS['help']} Help"
-    BUTTON_SETTINGS = f"{EMOJIS['settings']} Settings"
+    BUTTON_BACK = f"{get_emoji('back')} Back"
+    BUTTON_CANCEL = f"{get_emoji('error')} Cancel"
+    BUTTON_CONFIRM = f"{get_emoji('success')} Confirm"
+    BUTTON_REFRESH = f"{get_emoji('refresh')} Refresh"
+    BUTTON_HELP = f"{get_emoji('help')} Help"
+    BUTTON_SETTINGS = f"{get_emoji('settings')} Settings"
     
     # Game status
-    GAME_ACTIVE = f"{EMOJIS['active']} Game Active"
-    GAME_PAUSED = f"{EMOJIS['pause']} Game Paused"
-    GAME_ENDED = f"{EMOJIS['stop']} Game Ended"
+    GAME_ACTIVE = f"{get_emoji('active')} Game Active"
+    GAME_PAUSED = f"{get_emoji('pause')} Game Paused"
+    GAME_ENDED = f"{get_emoji('stop')} Game Ended"
     
     # Financial
     CURRENCY = "ETB"
@@ -221,6 +132,7 @@ __all__ = [
     
     # Emojis
     'EMOJIS',
+    'get_emoji',
     
     # Helper functions
     'get_text',
@@ -235,5 +147,5 @@ __all__ = [
     'TextConstants',
     
     # Validation
-    'validate_texts'
+    'validate_texts',
 ]

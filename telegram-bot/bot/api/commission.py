@@ -1,4 +1,4 @@
-# api/commission.py
+# telegram-bot/bot/api/commission.py
 """Commission/win percentage API endpoints for game server
 Estif Bingo 24/7 - Handles win percentage management
 """
@@ -6,9 +6,9 @@ Estif Bingo 24/7 - Handles win percentage management
 import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from .auth import api_key_required
-from ..db.database import Database
-from ..config import WIN_PERCENTAGES, DEFAULT_WIN_PERCENTAGE
+from bot.db.database import Database
+from bot.config import config
+from bot.utils import logger as bot_logger
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,47 @@ logger = logging.getLogger(__name__)
 commission_bp = Blueprint('commission', __name__)
 
 
+# ==================== API KEY DECORATOR ====================
+
+def api_key_required(f):
+    """Decorator to require API key for endpoints"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        if not api_key:
+            return jsonify({"success": False, "message": "Missing API key"}), 401
+        if api_key != config.API_SECRET:
+            logger.warning(f"Invalid API key attempt")
+            return jsonify({"success": False, "message": "Invalid API key"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ==================== HELPER: Run async functions in Flask ====================
+
+def run_async(async_func, *args, **kwargs):
+    """Helper to run async functions in Flask's synchronous context"""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(async_func(*args, **kwargs))
+    except Exception as e:
+        logger.error(f"run_async error: {e}")
+        raise
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+
+
+# ==================== COMMISSION ENDPOINTS ====================
+
 @commission_bp.route('/api/commission', methods=['GET'])
 @api_key_required
-async def get_commission():
+def get_commission():
     """Get current win percentage
     
     Returns:
@@ -30,26 +68,26 @@ async def get_commission():
         }
     """
     try:
-        percentage = await Database.get_win_percentage()
+        percentage = run_async(Database.get_win_percentage)
         return jsonify({
             "success": True,
             "percentage": percentage,
-            "available": WIN_PERCENTAGES,
-            "default": DEFAULT_WIN_PERCENTAGE
+            "available": config.WIN_PERCENTAGES,
+            "default": config.DEFAULT_WIN_PERCENTAGE
         })
     except Exception as e:
         logger.exception("Get commission error")
         return jsonify({
             "success": False,
             "message": "Internal error",
-            "percentage": DEFAULT_WIN_PERCENTAGE,
-            "available": WIN_PERCENTAGES
+            "percentage": config.DEFAULT_WIN_PERCENTAGE,
+            "available": config.WIN_PERCENTAGES
         }), 500
 
 
 @commission_bp.route('/api/commission', methods=['POST'])
 @api_key_required
-async def set_commission():
+def set_commission():
     """Set win percentage
     
     Expected JSON body:
@@ -81,24 +119,24 @@ async def set_commission():
                 "message": "Missing percentage field"
             }), 400
         
-        if percentage not in WIN_PERCENTAGES:
+        if percentage not in config.WIN_PERCENTAGES:
             return jsonify({
                 "success": False,
-                "message": f"Invalid percentage. Allowed values: {WIN_PERCENTAGES}"
+                "message": f"Invalid percentage. Allowed values: {config.WIN_PERCENTAGES}"
             }), 400
         
         # Get previous percentage for response
-        previous = await Database.get_win_percentage()
+        previous = run_async(Database.get_win_percentage)
         
         # Update percentage
-        await Database.set_win_percentage(percentage)
+        run_async(Database.set_win_percentage, percentage)
         
         # Log the change
         logger.info(f"💰 Win percentage changed from {previous}% to {percentage}% via API")
         
         # Record in commission history (if you have commission_logs table)
         try:
-            await Database.log_commission_change(previous, percentage, "API")
+            run_async(Database.log_commission_change, previous, percentage, "API")
         except Exception as log_err:
             logger.warning(f"Could not log commission change: {log_err}")
         
@@ -119,7 +157,7 @@ async def set_commission():
 
 @commission_bp.route('/api/commission/history', methods=['GET'])
 @api_key_required
-async def get_commission_history():
+def get_commission_history():
     """Get win percentage change history
     
     Query params:
@@ -145,11 +183,11 @@ async def get_commission_history():
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
         
-        current = await Database.get_win_percentage()
+        current = run_async(Database.get_win_percentage)
         
         # Try to get history from commission_logs table
         try:
-            history = await Database.get_commission_history(limit, offset)
+            history = run_async(Database.get_commission_history, limit, offset)
         except Exception:
             # If table doesn't exist, return empty history
             history = []
@@ -171,7 +209,7 @@ async def get_commission_history():
 
 @commission_bp.route('/api/commission/stats', methods=['GET'])
 @api_key_required
-async def get_commission_stats():
+def get_commission_stats():
     """Get commission statistics
     
     Returns:
@@ -185,11 +223,11 @@ async def get_commission_stats():
         }
     """
     try:
-        current = await Database.get_win_percentage()
+        current = run_async(Database.get_win_percentage)
         
         # Get statistics from database
         try:
-            stats = await Database.get_commission_stats()
+            stats = run_async(Database.get_commission_stats)
         except Exception:
             stats = {
                 "total_commission": 0,
@@ -217,7 +255,7 @@ async def get_commission_stats():
 
 @commission_bp.route('/api/commission/calculate', methods=['POST'])
 @api_key_required
-async def calculate_commission():
+def calculate_commission():
     """Calculate commission for a given amount
     
     Expected JSON body:
@@ -253,12 +291,12 @@ async def calculate_commission():
             }), 400
         
         if win_percentage is None:
-            win_percentage = await Database.get_win_percentage()
+            win_percentage = run_async(Database.get_win_percentage)
         
-        if win_percentage not in WIN_PERCENTAGES:
+        if win_percentage not in config.WIN_PERCENTAGES:
             return jsonify({
                 "success": False,
-                "message": f"Invalid win_percentage. Allowed: {WIN_PERCENTAGES}"
+                "message": f"Invalid win_percentage. Allowed: {config.WIN_PERCENTAGES}"
             }), 400
         
         winner_reward = (total_bet * win_percentage) / 100
@@ -281,52 +319,7 @@ async def calculate_commission():
         }), 500
 
 
-# ==================== ADD THESE METHODS TO DATABASE.PY ====================
-# 
-# @classmethod
-# async def log_commission_change(cls, old_percentage: int, new_percentage: int, changed_by: str = "API"):
-#     """Log commission change to database"""
-#     async with cls._pool.acquire() as conn:
-#         await conn.execute("""
-#             INSERT INTO commission_logs (old_percentage, new_percentage, changed_by, changed_at)
-#             VALUES ($1, $2, $3, NOW())
-#         """, old_percentage, new_percentage, changed_by)
-# 
-# @classmethod
-# async def get_commission_history(cls, limit: int = 50, offset: int = 0):
-#     """Get commission change history"""
-#     async with cls._pool.acquire() as conn:
-#         rows = await conn.fetch("""
-#             SELECT id, old_percentage, new_percentage, changed_by, changed_at
-#             FROM commission_logs
-#             ORDER BY changed_at DESC
-#             LIMIT $1 OFFSET $2
-#         """, limit, offset)
-#         return [dict(r) for r in rows]
-# 
-# @classmethod
-# async def get_commission_stats(cls):
-#     """Get commission statistics"""
-#     async with cls._pool.acquire() as conn:
-#         # Get total commission from game_rounds
-#         total = await conn.fetchval("SELECT COALESCE(SUM(admin_commission), 0) FROM game_rounds")
-#         
-#         # Get average win percentage
-#         avg = await conn.fetchval("SELECT COALESCE(AVG(win_percentage), 0) FROM game_rounds")
-#         
-#         # Get number of changes
-#         changes = await conn.fetchval("SELECT COUNT(*) FROM commission_logs")
-#         
-#         # Get last change time
-#         last = await conn.fetchval("SELECT MAX(changed_at) FROM commission_logs")
-#         
-#         return {
-#             "total_commission": float(total) if total else 0,
-#             "average_win_percentage": float(avg) if avg else 0,
-#             "changes_count": changes or 0,
-#             "last_change": last.isoformat() if last else None
-#         }
-
+# ==================== ERROR HANDLERS ====================
 
 @commission_bp.errorhandler(401)
 def unauthorized(error):

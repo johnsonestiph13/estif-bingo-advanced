@@ -1,4 +1,6 @@
-# api/auth.py - COMPLETE UPDATED VERSION WITH ENHANCED ERROR HANDLING
+# telegram-bot/bot/api/auth.py
+# Estif Bingo 24/7 - Authentication API Endpoints (UPDATED & COMPATIBLE)
+
 import jwt
 import logging
 import traceback
@@ -6,13 +8,15 @@ import asyncio
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Blueprint, request, jsonify, abort
-from ..db.database import Database
-from ..config import API_SECRET, JWT_SECRET
+from bot.db.database import Database
+from bot.config import config
 
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
+
+# ==================== API KEY DECORATOR ====================
 
 def api_key_required(f):
     """Decorator to require valid API key for bot-to-server calls"""
@@ -22,12 +26,14 @@ def api_key_required(f):
         if not api_key:
             logger.warning(f"Missing API key from {request.remote_addr}")
             abort(401, description="Missing API key")
-        if api_key != API_SECRET:
+        if api_key != config.API_SECRET:
             logger.warning(f"Invalid API key from {request.remote_addr}: {api_key[:10]}...")
             abort(401, description="Invalid API key")
         return f(*args, **kwargs)
     return decorated
 
+
+# ==================== HELPER: Run async functions in Flask ====================
 
 def run_async(coro):
     """Run async coroutine in a new event loop (safe for Flask)"""
@@ -44,6 +50,8 @@ def run_async(coro):
         except Exception:
             pass
 
+
+# ==================== HEALTH ENDPOINTS ====================
 
 @auth_bp.route('/health', methods=['GET'])
 def health():
@@ -69,6 +77,24 @@ def health():
         }), 500
 
 
+@auth_bp.route('/api/bridge-health', methods=['GET'])
+@api_key_required
+def bridge_health():
+    """Health check for bot bridge (with API key)"""
+    try:
+        return jsonify({
+            "success": True,
+            "status": "healthy",
+            "service": "telegram-bot-api",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Bridge health error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==================== TOKEN VERIFICATION ENDPOINTS ====================
+
 @auth_bp.route('/api/verify-token', methods=['POST'])
 @api_key_required
 def verify_token():
@@ -84,9 +110,9 @@ def verify_token():
         
         # Decode and verify JWT
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            payload = jwt.decode(token, config.JWT_SECRET, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
-            logger.warning(f"Token expired: {token[:20]}...")
+            logger.warning(f"Token expired")
             return jsonify({"valid": False, "message": "Token expired"}), 401
         except jwt.InvalidTokenError as e:
             logger.warning(f"Invalid token: {e}")
@@ -97,7 +123,7 @@ def verify_token():
             return jsonify({"valid": False, "message": "Invalid token payload"}), 401
         
         # Get user from database
-        user = run_async(Database.get_user(telegram_id))
+        user = run_async(Database.get_user, telegram_id)
         if not user:
             return jsonify({"valid": False, "message": "User not found"}), 404
         
@@ -113,8 +139,10 @@ def verify_token():
         
     except Exception as e:
         logger.exception(f"Token verification error: {e}")
-        return jsonify({"valid": False, "message": f"Internal server error"}), 500
+        return jsonify({"valid": False, "message": "Internal server error"}), 500
 
+
+# ==================== AUTH CODE EXCHANGE ENDPOINTS ====================
 
 @auth_bp.route('/api/exchange-code', methods=['POST'])
 @api_key_required
@@ -130,13 +158,13 @@ def exchange_code():
             return jsonify({"success": False, "message": "Missing code"}), 400
         
         # Verify and consume auth code
-        telegram_id = run_async(Database.consume_auth_code(code))
+        telegram_id = run_async(Database.consume_auth_code, code)
         if not telegram_id:
             logger.warning(f"Invalid or expired code: {code[:10]}...")
             return jsonify({"success": False, "message": "Invalid or expired code"}), 401
         
         # Get user from database
-        user = run_async(Database.get_user(telegram_id))
+        user = run_async(Database.get_user, telegram_id)
         if not user:
             return jsonify({"success": False, "message": "User not found"}), 404
         
@@ -149,10 +177,10 @@ def exchange_code():
                 "telegram_id": telegram_id,
                 "username": user.get("username") or f"User{telegram_id}",
                 "balance": float(user.get("balance", 0)),
-                "exp": datetime.utcnow() + timedelta(hours=2),
+                "exp": datetime.utcnow() + timedelta(hours=config.JWT_EXPIRY_HOURS),
                 "iat": datetime.utcnow()
             },
-            JWT_SECRET,
+            config.JWT_SECRET,
             algorithm="HS256"
         )
         
@@ -185,7 +213,7 @@ def create_auth_code():
             return jsonify({"success": False, "message": "Missing telegram_id"}), 400
         
         # Create auth code
-        code = run_async(Database.create_auth_code(telegram_id))
+        code = run_async(Database.create_auth_code, telegram_id)
         
         logger.info(f"✅ Auth code created for user {telegram_id}")
         
@@ -200,12 +228,45 @@ def create_auth_code():
         return jsonify({"success": False, "message": "Internal server error"}), 500
 
 
+@auth_bp.route('/api/verify-code', methods=['POST'])
+@api_key_required
+def verify_code():
+    """Verify one-time code and return user data (without JWT)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "Invalid request body"}), 400
+        
+        code = data.get('code')
+        if not code:
+            return jsonify({"success": False, "error": "Code required"}), 400
+        
+        telegram_id = run_async(Database.verify_auth_code, code)
+        
+        if telegram_id:
+            user = run_async(Database.get_user, telegram_id)
+            if user:
+                return jsonify({
+                    'success': True,
+                    'telegram_id': telegram_id,
+                    'username': user.get('username', 'Player'),
+                    'balance': float(user.get('balance', 0))
+                })
+        
+        return jsonify({'success': False, 'error': 'Invalid or expired code'}), 401
+    except Exception as e:
+        logger.error(f"Verify code error: {e}")
+        return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
+
+# ==================== USER MANAGEMENT ENDPOINTS ====================
+
 @auth_bp.route('/api/get-user/<int:telegram_id>', methods=['GET'])
 @api_key_required
 def get_user(telegram_id):
     """Get user details by Telegram ID"""
     try:
-        user = run_async(Database.get_user(telegram_id))
+        user = run_async(Database.get_user, telegram_id)
         
         if not user:
             return jsonify({"success": False, "message": "User not found"}), 404
@@ -227,6 +288,43 @@ def get_user(telegram_id):
         return jsonify({"success": False, "message": "Internal server error"}), 500
 
 
+@auth_bp.route('/api/get-user', methods=['POST'])
+@api_key_required
+def get_user_post():
+    """Get user details by Telegram ID (POST method)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "Invalid request body"}), 400
+        
+        telegram_id = data.get('telegram_id')
+        if not telegram_id:
+            return jsonify({"success": False, "message": "Missing telegram_id"}), 400
+        
+        user = run_async(Database.get_user, telegram_id)
+        
+        if not user:
+            return jsonify({"success": False, "message": "User not found"}), 404
+        
+        # Convert Decimal to float for JSON serialization
+        user_data = dict(user)
+        if 'balance' in user_data:
+            user_data['balance'] = float(user_data['balance'])
+        if 'total_deposited' in user_data:
+            user_data['total_deposited'] = float(user_data['total_deposited'])
+        
+        return jsonify({
+            "success": True,
+            "user": user_data
+        })
+        
+    except Exception as e:
+        logger.exception(f"Get user error: {e}")
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+# ==================== BALANCE ENDPOINTS ====================
+
 @auth_bp.route('/api/balance/<int:telegram_id>', methods=['GET'])
 @api_key_required
 def get_balance(telegram_id):
@@ -237,7 +335,7 @@ def get_balance(telegram_id):
         return jsonify({
             "success": True,
             "balance": balance,
-            "can_play": balance >= 10
+            "can_play": balance >= config.MIN_BALANCE_FOR_PLAY
         })
         
     except Exception as e:
@@ -261,7 +359,7 @@ def get_balance_post():
         return jsonify({
             "success": True,
             "balance": balance,
-            "can_play": balance >= 10
+            "can_play": balance >= config.MIN_BALANCE_FOR_PLAY
         })
         
     except Exception as e:
@@ -301,6 +399,41 @@ def adjust_balance():
         logger.exception(f"Adjust balance error: {e}")
         return jsonify({"success": False, "message": "Internal server error"}), 500
 
+
+# ==================== SEARCH ENDPOINTS ====================
+
+@auth_bp.route('/api/search-players', methods=['POST'])
+@api_key_required
+def search_players():
+    """Search players by username or phone"""
+    try:
+        data = request.get_json()
+        search_term = data.get('search', '')
+        
+        if len(search_term) < 2:
+            return jsonify({"success": False, "message": "Search term must be at least 2 characters"}), 400
+        
+        players = run_async(Database.search_players, search_term)
+        
+        # Convert Decimal to float for JSON serialization
+        for player in players:
+            if 'balance' in player:
+                player['balance'] = float(player['balance'])
+            if 'total_deposited' in player:
+                player['total_deposited'] = float(player['total_deposited'])
+        
+        return jsonify({
+            "success": True,
+            "players": players,
+            "count": len(players)
+        })
+        
+    except Exception as e:
+        logger.exception(f"Search players error: {e}")
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+# ==================== ERROR HANDLERS ====================
 
 @auth_bp.errorhandler(401)
 def unauthorized(error):

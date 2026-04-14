@@ -1,5 +1,5 @@
 # telegram-bot/bot/db/database.py
-# Estif Bingo 24/7 - Complete Database Module (UPDATED)
+# Estif Bingo 24/7 - Complete Database Module (FULLY UPDATED & COMPATIBLE)
 
 import asyncpg
 import logging

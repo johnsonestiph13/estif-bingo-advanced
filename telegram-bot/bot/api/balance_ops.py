@@ -1,23 +1,61 @@
-# api/balance_ops.py
+# telegram-bot/bot/api/balance_ops.py
 """Balance operations API endpoints for game server
 Estif Bingo 24/7 - Handles all balance-related API calls from Node.js game server
 """
 
 import logging
 from flask import Blueprint, request, jsonify
-from .auth import api_key_required
-from ..db.database import Database
-from ..config import CARTELA_PRICE, MIN_BALANCE_FOR_PLAY
+from bot.db.database import Database
+from bot.config import config
+from bot.utils import logger as bot_logger
 
 logger = logging.getLogger(__name__)
 
 # Create blueprint
-balance_bp = Blueprint('balance', __name__)
+balance_bp = Blueprint('balance_ops', __name__)
 
+
+# ==================== API KEY DECORATOR ====================
+
+def api_key_required(f):
+    """Decorator to require API key for endpoints"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        if not api_key:
+            return jsonify({"success": False, "message": "Missing API key"}), 401
+        if api_key != config.API_SECRET:
+            logger.warning(f"Invalid API key attempt")
+            return jsonify({"success": False, "message": "Invalid API key"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ==================== HELPER: Run async functions in Flask ====================
+
+def run_async(async_func, *args, **kwargs):
+    """Helper to run async functions in Flask's synchronous context"""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(async_func(*args, **kwargs))
+    except Exception as e:
+        logger.error(f"run_async error: {e}")
+        raise
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+
+
+# ==================== BALANCE ENDPOINTS ====================
 
 @balance_bp.route('/api/deduct', methods=['POST'])
 @api_key_required
-async def deduct():
+def deduct():
     """Deduct balance from user (called by game server when player selects cartela)
     
     Expected JSON body:
@@ -35,7 +73,7 @@ async def deduct():
             return jsonify({"success": False, "message": "Invalid request body"}), 400
         
         telegram_id = data.get('telegram_id')
-        amount = data.get('amount', CARTELA_PRICE)
+        amount = data.get('amount', config.CARTELA_PRICE)
         cartela_id = data.get('cartela_id')
         round_num = data.get('round')
         reason = data.get('reason', f'Cartela {cartela_id} selection')
@@ -44,7 +82,7 @@ async def deduct():
             return jsonify({"success": False, "message": "telegram_id required"}), 400
         
         # Check if user has sufficient balance
-        current_balance = await Database.get_balance(telegram_id)
+        current_balance = run_async(Database.get_balance, telegram_id)
         if current_balance < amount:
             logger.warning(f"Insufficient balance for user {telegram_id}: {current_balance} < {amount}")
             return jsonify({
@@ -53,18 +91,10 @@ async def deduct():
             }), 400
         
         # Perform deduction
-        new_balance = await Database.deduct_balance(telegram_id, amount, reason)
+        new_balance = run_async(Database.deduct_balance, telegram_id, amount, reason)
         
         # Log the transaction
-        await Database.log_game_transaction(
-            telegram_id, 
-            None,  # username will be fetched inside
-            "bet", 
-            -amount, 
-            cartela_id, 
-            round_num, 
-            reason
-        )
+        run_async(Database.log_game_transaction, telegram_id, None, "bet", -amount, cartela_id, round_num, reason)
         
         logger.info(f"✅ Deducted {amount} ETB from user {telegram_id}. New balance: {new_balance:.2f}")
         
@@ -75,7 +105,7 @@ async def deduct():
         })
         
     except ValueError as e:
-        logger.warning(f"Balance deduction failed for user {data.get('telegram_id')}: {e}")
+        logger.warning(f"Balance deduction failed for user {data.get('telegram_id') if data else None}: {e}")
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.exception(f"Deduct error: {e}")
@@ -84,7 +114,7 @@ async def deduct():
 
 @balance_bp.route('/api/add', methods=['POST'])
 @api_key_required
-async def add():
+def add():
     """Add balance to user (called by game server for wins/refunds)
     
     Expected JSON body:
@@ -112,18 +142,10 @@ async def add():
             return jsonify({"success": False, "message": "Valid amount required"}), 400
         
         # Perform addition
-        new_balance = await Database.add_balance(telegram_id, amount, reason)
+        new_balance = run_async(Database.add_balance, telegram_id, amount, reason)
         
         # Log the transaction
-        await Database.log_game_transaction(
-            telegram_id, 
-            None,  # username will be fetched inside
-            "win", 
-            amount, 
-            None, 
-            round_id, 
-            reason
-        )
+        run_async(Database.log_game_transaction, telegram_id, None, "win", amount, None, round_id, reason)
         
         logger.info(f"✅ Added {amount} ETB to user {telegram_id}. New balance: {new_balance:.2f}")
         
@@ -140,7 +162,7 @@ async def add():
 
 @balance_bp.route('/api/balance', methods=['POST'])
 @api_key_required
-async def get_balance():
+def get_balance():
     """Get user's current balance
     
     Expected JSON body:
@@ -158,12 +180,12 @@ async def get_balance():
         if not telegram_id:
             return jsonify({"success": False, "message": "telegram_id required"}), 400
         
-        balance = await Database.get_balance(telegram_id)
+        balance = run_async(Database.get_balance, telegram_id)
         
         return jsonify({
             "success": True, 
             "balance": balance,
-            "can_play": balance >= MIN_BALANCE_FOR_PLAY
+            "can_play": balance >= config.MIN_BALANCE_FOR_PLAY
         })
         
     except Exception as e:
@@ -173,18 +195,18 @@ async def get_balance():
 
 @balance_bp.route('/api/balance/<int:telegram_id>', methods=['GET'])
 @api_key_required
-async def get_balance_by_id(telegram_id):
+def get_balance_by_id(telegram_id):
     """Get user's current balance by ID in URL
     
     Expected URL: /api/balance/123456789
     """
     try:
-        balance = await Database.get_balance(telegram_id)
+        balance = run_async(Database.get_balance, telegram_id)
         
         return jsonify({
             "success": True, 
             "balance": balance,
-            "can_play": balance >= MIN_BALANCE_FOR_PLAY
+            "can_play": balance >= config.MIN_BALANCE_FOR_PLAY
         })
         
     except Exception as e:
@@ -194,7 +216,7 @@ async def get_balance_by_id(telegram_id):
 
 @balance_bp.route('/api/balance/batch', methods=['POST'])
 @api_key_required
-async def batch_balance():
+def batch_balance():
     """Get balances for multiple users at once
     
     Expected JSON body:
@@ -214,10 +236,10 @@ async def batch_balance():
         
         results = {}
         for tid in telegram_ids:
-            balance = await Database.get_balance(tid)
+            balance = run_async(Database.get_balance, tid)
             results[str(tid)] = {
                 "balance": balance,
-                "can_play": balance >= MIN_BALANCE_FOR_PLAY
+                "can_play": balance >= config.MIN_BALANCE_FOR_PLAY
             }
         
         return jsonify({
@@ -232,7 +254,7 @@ async def batch_balance():
 
 @balance_bp.route('/api/transfer', methods=['POST'])
 @api_key_required
-async def transfer_balance():
+def transfer_balance():
     """Transfer balance between users (admin or internal use)
     
     Expected JSON body:
@@ -260,7 +282,7 @@ async def transfer_balance():
             return jsonify({"success": False, "message": "Amount must be positive"}), 400
         
         # Check if sender has sufficient balance
-        sender_balance = await Database.get_balance(from_id)
+        sender_balance = run_async(Database.get_balance, from_id)
         if sender_balance < amount:
             return jsonify({
                 "success": False, 
@@ -268,15 +290,15 @@ async def transfer_balance():
             }), 400
         
         # Perform transfer
-        await Database.deduct_balance(from_id, amount, f"Transfer to {to_id}: {reason}")
-        await Database.add_balance(to_id, amount, f"Transfer from {from_id}: {reason}")
+        run_async(Database.deduct_balance, from_id, amount, f"Transfer to {to_id}: {reason}")
+        run_async(Database.add_balance, to_id, amount, f"Transfer from {from_id}: {reason}")
         
         # Log transactions
-        await Database.log_game_transaction(from_id, None, "transfer_out", -amount, None, None, f"Transfer to {to_id}")
-        await Database.log_game_transaction(to_id, None, "transfer_in", amount, None, None, f"Transfer from {from_id}")
+        run_async(Database.log_game_transaction, from_id, None, "transfer_out", -amount, None, None, f"Transfer to {to_id}")
+        run_async(Database.log_game_transaction, to_id, None, "transfer_in", amount, None, None, f"Transfer from {from_id}")
         
-        new_sender_balance = await Database.get_balance(from_id)
-        new_receiver_balance = await Database.get_balance(to_id)
+        new_sender_balance = run_async(Database.get_balance, from_id)
+        new_receiver_balance = run_async(Database.get_balance, to_id)
         
         logger.info(f"✅ Transferred {amount} ETB from {from_id} to {to_id}")
         
@@ -304,7 +326,7 @@ async def transfer_balance():
 
 @balance_bp.route('/api/transactions/<int:telegram_id>', methods=['GET'])
 @api_key_required
-async def get_transactions(telegram_id):
+def get_transactions(telegram_id):
     """Get user's transaction history
     
     Optional query params:
@@ -315,7 +337,7 @@ async def get_transactions(telegram_id):
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
         
-        transactions = await Database.get_user_transactions(telegram_id, limit, offset)
+        transactions = run_async(Database.get_user_transactions, telegram_id, limit, offset)
         
         # Convert Decimal to float for JSON serialization
         for tx in transactions:
@@ -332,6 +354,8 @@ async def get_transactions(telegram_id):
         logger.exception(f"Get transactions error: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
+
+# ==================== ERROR HANDLERS ====================
 
 @balance_bp.errorhandler(401)
 def unauthorized(error):

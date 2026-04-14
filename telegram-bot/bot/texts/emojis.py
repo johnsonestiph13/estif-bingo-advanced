@@ -1,5 +1,5 @@
-# bot/texts/emojis.py
-# Estif Bingo 24/7 - Complete Emoji Mappings
+# telegram-bot/bot/texts/emojis.py
+# Estif Bingo 24/7 - Complete Emoji Mappings (UPDATED)
 
 EMOJIS = {
     # ==================== GAME EMOJIS ====================
@@ -78,6 +78,9 @@ EMOJIS = {
     'email': '📧',
     'link': '🔗',
     'notification': '🔔',
+    'language': '🌐',
+    'copy': '📋',
+    'camera': '📸',
     
     # ==================== STATISTICS & DATA ====================
     'stats': '📊',
@@ -133,6 +136,10 @@ EMOJIS = {
     'arrow_down': '⬇️',
     'arrow_left': '⬅️',
     'arrow_right': '➡️',
+    'new': '🆕',
+    'id': '🆔',
+    'user': '👤',
+    'users': '👥',
 }
 
 # ==================== HELPER FUNCTIONS ====================
@@ -341,6 +348,36 @@ def get_import_emoji() -> str:
     return get_emoji('import')
 
 
+def get_language_emoji() -> str:
+    """Get language emoji"""
+    return get_emoji('language')
+
+
+def get_copy_emoji() -> str:
+    """Get copy emoji"""
+    return get_emoji('copy')
+
+
+def get_camera_emoji() -> str:
+    """Get camera emoji"""
+    return get_emoji('camera')
+
+
+def get_user_emoji() -> str:
+    """Get user emoji"""
+    return get_emoji('user')
+
+
+def get_new_emoji() -> str:
+    """Get new emoji"""
+    return get_emoji('new')
+
+
+def get_id_emoji() -> str:
+    """Get ID emoji"""
+    return get_emoji('id')
+
+
 # ==================== EMOJI FORMATTING HELPERS ====================
 
 def format_with_emoji(text: str, emoji_key: str) -> str:
@@ -416,6 +453,12 @@ __all__ = [
     'get_filter_emoji',
     'get_export_emoji',
     'get_import_emoji',
+    'get_language_emoji',
+    'get_copy_emoji',
+    'get_camera_emoji',
+    'get_user_emoji',
+    'get_new_emoji',
+    'get_id_emoji',
     
     # Formatting helpers
     'format_with_emoji',

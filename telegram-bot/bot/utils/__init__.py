@@ -154,6 +154,29 @@ from .security import (
 
 def get_utils_info() -> dict:
     """Get information about available utilities"""
+    # Check availability of optional modules
+    jwt_available = False
+    bcrypt_available = False
+    crypto_available = False
+    
+    try:
+        import jwt
+        jwt_available = True
+    except ImportError:
+        pass
+    
+    try:
+        import bcrypt
+        bcrypt_available = True
+    except ImportError:
+        pass
+    
+    try:
+        from cryptography.fernet import Fernet
+        crypto_available = True
+    except ImportError:
+        pass
+    
     return {
         "otp": {
             "available": True,
@@ -169,9 +192,9 @@ def get_utils_info() -> dict:
         },
         "security": {
             "available": True,
-            "jwt_support": JWT_AVAILABLE if 'JWT_AVAILABLE' in dir() else False,
-            "bcrypt_support": BCRYPT_AVAILABLE if 'BCRYPT_AVAILABLE' in dir() else False,
-            "crypto_support": CRYPTO_AVAILABLE if 'CRYPTO_AVAILABLE' in dir() else False,
+            "jwt_support": jwt_available,
+            "bcrypt_support": bcrypt_available,
+            "crypto_support": crypto_available,
             "rate_limiters": ["otp", "deposit", "cashout", "api", "game"]
         }
     }
@@ -183,13 +206,24 @@ def setup_all_utils():
     try:
         cleanup_old_logs()
     except Exception as e:
-        logger.warning(f"Failed to cleanup logs: {e}")
+        try:
+            from .logger import logger
+            logger.warning(f"Failed to cleanup logs: {e}")
+        except ImportError:
+            print(f"⚠️ Failed to cleanup logs: {e}")
     
-    # Log initialization
-    logger.info("🛠️ Utilities initialized successfully")
-    logger.info(f"   - OTP Manager: Available")
-    logger.info(f"   - Security: Available")
-    logger.info(f"   - Rate Limiters: Active")
+    # Log initialization (using a simple print if logger not ready)
+    try:
+        from .logger import logger
+        logger.info("🛠️ Utilities initialized successfully")
+        logger.info("   - OTP Manager: Available")
+        logger.info("   - Security: Available")
+        logger.info("   - Rate Limiters: Active")
+    except ImportError:
+        print("🛠️ Utilities initialized successfully")
+        print("   - OTP Manager: Available")
+        print("   - Security: Available")
+        print("   - Rate Limiters: Active")
     
     return True
 
@@ -197,6 +231,9 @@ def setup_all_utils():
 # ==================== VERSION ====================
 __version__ = "1.0.0"
 __author__ = "Estif Bingo Team"
+
+
+# ==================== EXPORTS ====================
 __all__ = [
     # OTP exports
     'generate_numeric_otp',
@@ -301,6 +338,7 @@ __all__ = [
     '__version__',
     '__author__'
 ]
+
 
 # ==================== AUTO-INITIALIZATION ====================
 # Auto-setup utilities when imported (unless in test mode)

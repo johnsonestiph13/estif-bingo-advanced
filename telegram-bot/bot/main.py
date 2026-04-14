@@ -1,6 +1,6 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Added single instance lock to prevent conflict errors
+# FIXED: Removed unused imports, added proper conversation states
 
 import asyncio
 import logging
@@ -21,14 +21,12 @@ logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging
 logger = logging.getLogger(__name__)
 
 # ==================== SINGLE INSTANCE LOCK ====================
-# Prevent multiple bot instances from running simultaneously
 _lock_file = None
 
 def acquire_instance_lock():
     """Acquire a lock to ensure only one bot instance runs"""
     global _lock_file
     try:
-        # Create lock directory if it doesn't exist
         lock_dir = '/tmp'
         if not os.path.exists(lock_dir):
             lock_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,7 +61,6 @@ def run_flask():
     app = Flask(__name__)
     CORS(app)
     
-    # Add health check endpoint
     @app.route('/health', methods=['GET'])
     def health_check():
         return jsonify({"status": "healthy", "bot": "running", "timestamp": __import__('datetime').datetime.utcnow().isoformat()}), 200
@@ -97,7 +94,7 @@ def run_bot():
     from bot.handlers.cashout import (
         cashout, cashout_callback, 
         cashout_amount, cashout_account, cashout_cancel,
-        METHOD, AMOUNT as CASHOUT_AMOUNT, ACCOUNT
+        AMOUNT as CASHOUT_AMOUNT, ACCOUNT
     )
     from bot.handlers.balance import balance
     from bot.handlers.invite import invite
@@ -118,7 +115,7 @@ def run_bot():
         PHONE_NUMBER, AMOUNT as TRANSFER_AMOUNT, CONFIRM
     )
     
-    # Import game handlers (NO quick_play_callback)
+    # Import game handlers
     from bot.handlers.game import (
         play_command, game_callback,
         stats_callback, leaderboard_callback, back_to_game_callback,
@@ -156,10 +153,10 @@ def run_bot():
     application.add_handler(CommandHandler("register", register))
     application.add_handler(CommandHandler("balance", balance))
     application.add_handler(CommandHandler("bingo", bingo_otp))
+    application.add_handler(CommandHandler("verify", verify_otp))
     application.add_handler(CommandHandler("invite", invite))
     application.add_handler(CommandHandler("contact", contact_center))
     application.add_handler(CommandHandler("play", play_command))
-    application.add_handler(CommandHandler("verify", verify_otp))
     
     # Admin commands
     application.add_handler(CommandHandler("admin", admin_panel))
@@ -174,7 +171,7 @@ def run_bot():
     application.add_handler(MessageHandler(filters.PHOTO, deposit_screenshot))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     
-    # Menu button handlers - UPDATED with Play button at the top
+    # Menu button handlers
     application.add_handler(MessageHandler(filters.Regex("^🎮 Play$|^🎮 ጨዋታ$"), play_command))
     application.add_handler(MessageHandler(filters.Regex("📝 Register|📝 ተመዝገብ"), register))
     application.add_handler(MessageHandler(filters.Regex("💰 Deposit|💰 ገንዘብ አስገባ"), deposit))
@@ -186,7 +183,6 @@ def run_bot():
     
     # Catch-all text handler
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, game_callback))
     
     # ==================== CALLBACK QUERY HANDLERS ====================
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
@@ -194,7 +190,7 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(cashout_callback, pattern="^cashout_"))
     application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
     
-    # Game callbacks (NO quick_play_callback)
+    # Game callbacks
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^game_stats$"))
     application.add_handler(CallbackQueryHandler(leaderboard_callback, pattern="^game_leaderboard$"))
     application.add_handler(CallbackQueryHandler(back_to_game_callback, pattern="^back_to_game$"))
@@ -273,10 +269,8 @@ def run_bot():
             MessageHandler(filters.Regex("💳 Cash Out|💳 ገንዘብ አውጣ"), cashout)
         ],
         states={
-            METHOD: [
-                CallbackQueryHandler(cashout_callback, pattern="^cashout_")
-            ],
             CASHOUT_AMOUNT: [
+                CallbackQueryHandler(cashout_callback, pattern="^cashout_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cashout_amount)
             ],
             ACCOUNT: [
@@ -309,23 +303,22 @@ def run_bot():
     logger.info("🤖 Estif Bingo Bot started successfully!")
     logger.info("📦 Features: Transfer | Game | Deposit | Cashout | Web App")
     
-    # Reset webhook before starting polling (to avoid conflicts)
+    # Reset webhook before starting polling
     try:
         import httpx
-        bot_token = BOT_TOKEN
-        webhook_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+        webhook_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
         response = httpx.post(webhook_url)
         if response.status_code == 200:
             logger.info("✅ Webhook cleared before starting polling")
     except Exception as e:
         logger.warning(f"Could not clear webhook: {e}")
     
-    # Run the bot with error catching
+    # Run the bot
     try:
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=['message', 'callback_query', 'web_app_data'],
-            stop_signals=None  # Prevent signal conflicts in container
+            stop_signals=None
         )
     except Exception as e:
         logger.error(f"💥 Bot crashed: {e}")
@@ -345,7 +338,6 @@ async def async_main():
 
 def main():
     """Main entry point"""
-    # Acquire instance lock to prevent multiple instances
     if not acquire_instance_lock():
         sys.exit(1)
     

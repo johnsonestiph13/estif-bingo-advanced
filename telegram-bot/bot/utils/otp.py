@@ -39,13 +39,15 @@ def generate_numeric_otp(length: int = DEFAULT_OTP_LENGTH) -> str:
     otp = secrets.randbelow(max_num)
     return str(otp).zfill(length)
 
+
 def generate_alphanumeric_otp(length: int = 8) -> str:
     """
     Generate alphanumeric OTP (removes similar looking characters)
     Example: generate_alphanumeric_otp(8) -> "A3B9K2M7"
     """
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Removed: 0,1,I,O
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return ''.join(secrets.choice(alphabet) for _ in range(length))
+
 
 def generate_secure_token(length: int = 32) -> str:
     """
@@ -54,15 +56,17 @@ def generate_secure_token(length: int = 32) -> str:
     """
     return secrets.token_urlsafe(length)
 
+
 def generate_bingo_auth_code() -> str:
     """
     Generate special auth code for Bingo game access
     Format: BINGO-XXXXXX-YYYYYY
     """
     prefix = "BINGO"
-    part1 = secrets.token_hex(3).upper()  # 6 chars
-    part2 = secrets.token_hex(3).upper()  # 6 chars
+    part1 = secrets.token_hex(3).upper()
+    part2 = secrets.token_hex(3).upper()
     return f"{prefix}-{part1}-{part2}"
+
 
 def generate_phone_verification_code() -> str:
     """
@@ -70,6 +74,7 @@ def generate_phone_verification_code() -> str:
     Example: "123456"
     """
     return generate_numeric_otp(6)
+
 
 # ==================== OTP HASHING ====================
 
@@ -83,6 +88,7 @@ def hash_otp(otp: str, secret: str) -> str:
     combined = f"{otp}:{secret}"
     return hashlib.sha256(combined.encode()).hexdigest()
 
+
 def verify_hashed_otp(otp: str, hashed: str, secret: str) -> bool:
     """
     Verify OTP against stored hash using constant-time comparison
@@ -92,6 +98,7 @@ def verify_hashed_otp(otp: str, hashed: str, secret: str) -> bool:
         return False
     expected = hash_otp(otp, secret)
     return hmac.compare_digest(expected, hashed)
+
 
 def hash_with_salt(otp: str, salt: bytes = None) -> Tuple[str, str]:
     """
@@ -105,11 +112,13 @@ def hash_with_salt(otp: str, salt: bytes = None) -> Tuple[str, str]:
     hashed = hashlib.pbkdf2_hmac('sha256', salted_otp, salt, 100000)
     return base64.b64encode(hashed).decode(), base64.b64encode(salt).decode()
 
+
 def verify_salted_otp(otp: str, hashed: str, salt_b64: str) -> bool:
     """Verify salted OTP"""
     salt = base64.b64decode(salt_b64)
     expected, _ = hash_with_salt(otp, salt)
     return hmac.compare_digest(expected, hashed)
+
 
 # ==================== TIME-BASED OTP (TOTP) ====================
 
@@ -146,13 +155,11 @@ class TOTPGenerator:
         Verify OTP within time window
         window=1 checks current, previous, and next intervals
         """
-        # Prevent replay attacks
         current_counter = int(time.time() / self.interval)
         
         for i in range(-window, window + 1):
             counter = current_counter + i
             if self.generate(time_offset=i * self.interval) == otp:
-                # Check if this OTP was already used
                 if self._last_used == counter:
                     continue
                 self._last_used = counter
@@ -167,6 +174,7 @@ class TOTPGenerator:
     def get_secret_base32(self) -> str:
         """Get secret as Base32 for authenticator apps"""
         return base64.b32encode(self.secret).decode().replace('=', '')
+
 
 # ==================== OTP STORAGE (In-Memory) ====================
 
@@ -189,11 +197,7 @@ class OTPStore:
         self._rate_limiter: Dict[str, List[datetime]] = defaultdict(list)
     
     def store(self, key: str, otp: str, secret: str, expires_seconds: int = DEFAULT_OTP_EXPIRY_SECONDS) -> bool:
-        """
-        Store OTP with expiration
-        Returns True if stored successfully, False if rate limited
-        """
-        # Check rate limit
+        """Store OTP with expiration"""
         if not self._check_rate_limit(key):
             logger.warning(f"Rate limit exceeded for key: {key}")
             return False
@@ -205,26 +209,20 @@ class OTPStore:
         return True
     
     def verify(self, key: str, otp: str, secret: str) -> Tuple[bool, Optional[str]]:
-        """
-        Verify and consume OTP
-        Returns (is_valid, error_message)
-        """
+        """Verify and consume OTP"""
         if key not in self._store:
             return False, "OTP not found or already used"
         
         record = self._store[key]
         
-        # Check expiration
         if datetime.utcnow() > record.expires_at:
             del self._store[key]
             return False, "OTP has expired"
         
-        # Check attempts
         if record.attempts >= MAX_OTP_ATTEMPTS:
             del self._store[key]
             return False, "Too many failed attempts"
         
-        # Verify OTP
         if verify_hashed_otp(otp, record.hashed, secret):
             del self._store[key]
             return True, None
@@ -238,7 +236,6 @@ class OTPStore:
         now = datetime.utcnow()
         window_start = now - timedelta(seconds=OTP_RATE_LIMIT_SECONDS)
         
-        # Clean old entries
         self._rate_limiter[key] = [
             ts for ts in self._rate_limiter[key] if ts > window_start
         ]
@@ -256,7 +253,6 @@ class OTPStore:
         for k in expired:
             del self._store[k]
         
-        # Clean rate limiter
         window_start = now - timedelta(seconds=OTP_RATE_LIMIT_SECONDS)
         for key in list(self._rate_limiter.keys()):
             self._rate_limiter[key] = [
@@ -290,6 +286,7 @@ class OTPStore:
             'cleanup_status': 'active'
         }
 
+
 # ==================== OTP VALIDATION ====================
 
 def is_valid_numeric_otp(otp: str, expected_length: int = DEFAULT_OTP_LENGTH) -> bool:
@@ -298,17 +295,20 @@ def is_valid_numeric_otp(otp: str, expected_length: int = DEFAULT_OTP_LENGTH) ->
         return False
     return otp.isdigit()
 
+
 def is_valid_alphanumeric_otp(otp: str, expected_length: int = 8) -> bool:
     """Validate alphanumeric OTP format"""
     if not otp or len(otp) != expected_length:
         return False
-    pattern = r'^[A-HJ-NP-Z2-9]+$'  # Allowed chars only
+    pattern = r'^[A-HJ-NP-Z2-9]+$'
     return bool(re.match(pattern, otp))
+
 
 def is_valid_bingo_auth_code(code: str) -> bool:
     """Validate Bingo auth code format"""
     pattern = r'^BINGO-[A-F0-9]{6}-[A-F0-9]{6}$'
     return bool(re.match(pattern, code))
+
 
 # ==================== OTP FORMATTING ====================
 
@@ -320,11 +320,13 @@ def format_otp_for_display(otp: str, separator: str = ' ') -> str:
         return f"{otp[:4]}{separator}{otp[4:]}"
     return otp
 
+
 def mask_otp(otp: str, visible_chars: int = 2) -> str:
     """Mask OTP for logging (only show last N chars)"""
     if len(otp) <= visible_chars:
         return '*' * len(otp)
     return '*' * (len(otp) - visible_chars) + otp[-visible_chars:]
+
 
 # ==================== OTP EXPIRY ====================
 
@@ -338,6 +340,7 @@ def get_otp_expiry_message(expiry_seconds: int = DEFAULT_OTP_EXPIRY_SECONDS) -> 
     else:
         return f"{minutes} minutes"
 
+
 # ==================== OTP LOGGING ====================
 
 def log_otp_generation(key: str, otp: str, context: str = "") -> None:
@@ -345,10 +348,12 @@ def log_otp_generation(key: str, otp: str, context: str = "") -> None:
     masked = mask_otp(otp)
     logger.info(f"OTP generated for {key}: {masked} | Context: {context}")
 
+
 def log_otp_verification(key: str, success: bool, context: str = "") -> None:
     """Log OTP verification result"""
     status = "SUCCESS" if success else "FAILED"
     logger.info(f"OTP verification {status} for {key} | Context: {context}")
+
 
 # ==================== CONVENIENCE FUNCTIONS ====================
 
@@ -364,10 +369,7 @@ class OTPManager:
     
     def generate_and_store(self, identifier: str, length: int = DEFAULT_OTP_LENGTH, 
                           expiry_seconds: int = DEFAULT_OTP_EXPIRY_SECONDS) -> Optional[str]:
-        """
-        Generate OTP and store it
-        Returns OTP if successful, None if rate limited
-        """
+        """Generate OTP and store it"""
         otp = generate_numeric_otp(length)
         if self.store.store(identifier, otp, self.secret_key, expiry_seconds):
             return otp
@@ -391,9 +393,10 @@ class OTPManager:
         """Get manager statistics"""
         return self.store.get_stats()
 
+
 # ==================== GLOBAL INSTANCE ====================
-# Use this for application-wide OTP management
 _default_otp_manager = None
+
 
 def get_otp_manager(secret_key: str = None) -> OTPManager:
     """Get or create default OTP manager"""
@@ -404,6 +407,7 @@ def get_otp_manager(secret_key: str = None) -> OTPManager:
             logger.warning("Using auto-generated secret key for OTP manager")
         _default_otp_manager = OTPManager(secret_key)
     return _default_otp_manager
+
 
 # ==================== EXPORTS ====================
 __all__ = [

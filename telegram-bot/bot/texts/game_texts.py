@@ -1,5 +1,5 @@
 # telegram-bot/bot/texts/game_texts.py
-# Estif Bingo 24/7 - Game-Specific Texts (FULLY FIXED)
+# Estif Bingo 24/7 - Game-Specific Texts (FULLY UPDATED & COMPATIBLE)
 
 from .emojis import get_emoji
 
@@ -7,6 +7,7 @@ from .emojis import get_emoji
 def _e(key: str) -> str:
     """Safely get emoji character"""
     return get_emoji(key)
+
 
 # ==================== GAME TEXTS ====================
 GAME_TEXTS = {
@@ -17,7 +18,7 @@ GAME_TEXTS = {
                        f"{_e('cartela')} Cartela Price: `{{cartela_price}} ETB`\n"
                        f"{_e('stats')} Max Cartelas: `{{max_cartelas}}`\n"
                        f"{_e('target')} Win Percentage: `{{win_percentage}}%`\n\n"
-                       f"Click the button below to start playing!",
+                       f"{_e('click')} Click the button below to start playing!",
         
         'game_start': f"{_e('play')} *Game Started!*\n\n"
                      f"{_e('cartela')} Cartelas: `{{cartelas}}`\n"
@@ -48,12 +49,12 @@ GAME_TEXTS = {
                    f"• {_e('balance')} Net: `{{net:+.2f}} ETB`\n\n"
                    f"{_e('refresh')} Play again with /play",
         
-        # Game stats (FIXED: Using double braces for rank placeholder)
+        # Game stats
         'stats_title': f"{_e('stats')} *Your Bingo Statistics*\n\n",
         'stats_games': f"{_e('game')} *Games:*\n• Played: `{{played}}`\n• Won: `{{won}}`\n• Win Rate: `{{rate:.1f}}%`\n\n",
         'stats_financial': f"{_e('money')} *Financial:*\n• Total Bet: `{{bet:.2f}} ETB`\n• Total Win: `{{win:.2f}} ETB`\n• Net Profit: `{{net:+.2f}} ETB`\n• Best Win: `{{best:.2f}} ETB`\n\n",
         'stats_time': f"{_e('clock')} *Last Played:* `{{last_played}}`\n\n",
-        'stats_rank': f"{_e('trophy')} *Rank:* `{{rank}}`",  # ← FIXED: Double braces for placeholder
+        'stats_rank': f"{_e('trophy')} *Rank:* `{{rank}}`",
         
         # Leaderboard
         'leaderboard_title': f"{_e('trophy')} *BINGO LEADERBOARD* {_e('trophy')}\n\n",
@@ -85,7 +86,7 @@ GAME_TEXTS = {
         'quick_play': f"{_e('lightning')} *Quick Play - {{cartelas}} Cartela{{s}}*\n\n"
                      f"{_e('money')} Cost: `{{cost:.2f}} ETB`\n"
                      f"{_e('target')} Win Chance: `{{win_percentage}}%`\n\n"
-                     f"Click below to start!",
+                     f"{_e('click')} Click below to start!",
         
         'all_in': f"{_e('fire')} *ALL IN!*\n\n"
                  f"{_e('money')} Bet Amount: `{{amount:.2f}} ETB`\n"
@@ -116,7 +117,7 @@ GAME_TEXTS = {
                         f"• More cartelas = higher win chance!",
         
         'help_payment': f"{_e('money')} *Payments & Prizes*\n\n"
-                       f"{_e('money')} *Deposit:*\n"
+                       f"{_e('deposit')} *Deposit:*\n"
                        f"• Minimum: `10 ETB`\n"
                        f"• Methods: CBE, TeleBirr, M-Pesa\n\n"
                        f"{_e('withdraw')} *Withdrawal:*\n"
@@ -135,7 +136,7 @@ GAME_TEXTS = {
                        f"{_e('cartela')} የካርቴላ ዋጋ: `{{cartela_price}} ብር`\n"
                        f"{_e('stats')} ከፍተኛ ካርቴላዎች: `{{max_cartelas}}`\n"
                        f"{_e('target')} የማሸነፊያ መቶኛ: `{{win_percentage}}%`\n\n"
-                       f"ጨዋታውን ለመጀመር ከታች ያለውን ቁልፍ ይጫኑ!",
+                       f"{_e('click')} ጨዋታውን ለመጀመር ከታች ያለውን ቁልፍ ይጫኑ!",
         
         'game_start': f"{_e('play')} *ጨዋታ ተጀምሯል!*\n\n"
                      f"{_e('cartela')} ካርቴላዎች: `{{cartelas}}`\n"
@@ -168,6 +169,7 @@ GAME_TEXTS = {
     }
 }
 
+
 # ==================== GAME MESSAGES ====================
 GAME_MESSAGES = {
     'en': {
@@ -194,6 +196,7 @@ GAME_MESSAGES = {
     }
 }
 
+
 # ==================== ERROR MESSAGES ====================
 ERROR_MESSAGES = {
     'en': {
@@ -215,6 +218,7 @@ ERROR_MESSAGES = {
     }
 }
 
+
 # ==================== SUCCESS MESSAGES ====================
 SUCCESS_MESSAGES = {
     'en': {
@@ -232,6 +236,7 @@ SUCCESS_MESSAGES = {
     }
 }
 
+
 # ==================== INFO MESSAGES ====================
 INFO_MESSAGES = {
     'en': {
@@ -247,39 +252,42 @@ INFO_MESSAGES = {
     }
 }
 
+
 # ==================== ADMIN MESSAGES ====================
 ADMIN_MESSAGES = {
     'en': {
-        'panel': f"{_e('settings')} *Admin Panel*\n\nWelcome, Administrator!",
+        'panel': f"{_e('settings')} *Admin Panel*\n\n{_e('success')} Welcome, Administrator!",
         'deposit_pending': f"{_e('pending')} *Pending Deposits:* {{count}}",
         'cashout_pending': f"{_e('pending')} *Pending Withdrawals:* {{count}}",
         'user_stats': f"{_e('stats')} *User Statistics*\n\n• Total Users: {{total}}\n• Active Today: {{active}}\n• Total Deposits: {{deposits:.2f}} ETB\n• Total Withdrawals: {{withdrawals:.2f}} ETB",
         'commission_set': f"{_e('success')} Win percentage set to {{percentage}}%",
     },
     'am': {
-        'panel': f"{_e('settings')} *የአስተዳዳሪ ፓነል*\n\nእንኳን ደህና መጡ, አስተዳዳሪ!",
+        'panel': f"{_e('settings')} *የአስተዳዳሪ ፓነል*\n\n{_e('success')} እንኳን ደህና መጡ, አስተዳዳሪ!",
         'commission_set': f"{_e('success')} የማሸነፊያ መቶኛ ወደ {{percentage}}% ተቀይሯል",
     }
 }
 
+
 # ==================== TRANSFER MESSAGES ====================
 TRANSFER_MESSAGES = {
     'en': {
-        'start': f"{_e('transfer')} *Balance Transfer*\n\nEnter receiver's phone number:",
+        'start': f"{_e('transfer')} *Balance Transfer*\n\n{_e('phone')} Enter receiver's phone number:",
         'receiver_found': f"{_e('success')} Receiver found: {{username}}",
         'enter_amount': f"{_e('money')} Your balance: {{balance:.2f}} ETB\n\nEnter amount to transfer (min {{min}}, max {{max}}):",
-        'confirm': f"{_e('question')} *Confirm Transfer*\n\nTo: {{receiver}}\nAmount: {{amount:.2f}} ETB\nFee: {{fee:.2f}} ETB\nTotal: {{total:.2f}} ETB\n\nConfirm?",
-        'success': f"{_e('success')} *Transfer Successful!*\n\nSent: {{amount:.2f}} ETB to {{receiver}}\nNew balance: {{balance:.2f}} ETB",
+        'confirm': f"{_e('question')} *Confirm Transfer*\n\n{_e('user')} To: {{receiver}}\n{_e('money')} Amount: {{amount:.2f}} ETB\n{_e('info')} Fee: {{fee:.2f}} ETB\n{_e('money')} Total: {{total:.2f}} ETB\n\nConfirm?",
+        'success': f"{_e('success')} *Transfer Successful!*\n\n{_e('money')} Sent: {{amount:.2f}} ETB to {{receiver}}\n{_e('balance')} New balance: {{balance:.2f}} ETB",
         'failed': f"{_e('error')} Transfer failed: {{reason}}",
         'cancelled': f"{_e('warning')} Transfer cancelled.",
     },
     'am': {
-        'start': f"{_e('transfer')} *ገንዘብ ማስተላለፍ*\n\nየተቀባዩን ስልክ ቁጥር ያስገቡ:",
-        'success': f"{_e('success')} *ገንዘብ ማስተላለፍ ተሳክቷል!*\n\n{{amount:.2f}} ብር ላኩ\nአዲስ ቀሪ ሂሳብ: {{balance:.2f}} ብር",
+        'start': f"{_e('transfer')} *ገንዘብ ማስተላለፍ*\n\n{_e('phone')} የተቀባዩን ስልክ ቁጥር ያስገቡ:",
+        'success': f"{_e('success')} *ገንዘብ ማስተላለፍ ተሳክቷል!*\n\n{_e('money')} {{amount:.2f}} ብር ላኩ\n{_e('balance')} አዲስ ቀሪ ሂሳብ: {{balance:.2f}} ብር",
     }
 }
 
-# Export all
+
+# ==================== EXPORTS ====================
 __all__ = [
     'GAME_TEXTS',
     'GAME_MESSAGES',

@@ -22,11 +22,11 @@ from bot.db.database import Database, database
 from bot.api.game_api import game_api_bp
 from bot.api.webhooks import webhook_bp
 
-# Keyboard modules - FIXED: Added main_menu alias
+# Keyboard modules
 from bot.keyboards.menu import (
     menu, 
     main_menu_inline, 
-    main_menu,  # ← ADDED: main_menu alias
+    main_menu,
     back_button, 
     confirm_keyboard,
     deposit_methods_keyboard, 
@@ -35,11 +35,14 @@ from bot.keyboards.menu import (
     admin_keyboard
 )
 from bot.keyboards.game_keyboards import (
-    game_menu_keyboard, quick_play_keyboard, cartela_selection_keyboard,
-    game_control_keyboard, game_settings_keyboard, game_stats_keyboard,
-    game_leaderboard_keyboard, in_game_keyboard, betting_keyboard,
-    number_selection_keyboard, game_reply_keyboard, game_help_keyboard,
-    get_game_keyboard, GAME_KEYBOARD_PRESETS
+    game_menu_keyboard,
+    game_stats_keyboard,
+    game_leaderboard_keyboard,
+    game_settings_keyboard,
+    game_help_keyboard,
+    game_reply_keyboard,
+    get_game_keyboard,
+    GAME_KEYBOARD_PRESETS
 )
 
 # Text modules
@@ -88,7 +91,7 @@ def get_handlers():
         from bot.handlers import (
             start, register, deposit, cashout, balance, invite,
             contact_center, bingo_otp, admin_commands, transfer,
-            play_command, game_callback, quick_play_callback,
+            play_command, game_callback, verify_otp,
             stats_callback, leaderboard_callback, back_to_game_callback
         )
         _HANDLERS = {
@@ -100,11 +103,11 @@ def get_handlers():
             'invite': invite,
             'contact_center': contact_center,
             'bingo_otp': bingo_otp,
+            'verify_otp': verify_otp,
             'admin_commands': admin_commands,
             'transfer': transfer,
             'play_command': play_command,
             'game_callback': game_callback,
-            'quick_play_callback': quick_play_callback,
             'stats_callback': stats_callback,
             'leaderboard_callback': leaderboard_callback,
             'back_to_game_callback': back_to_game_callback,
@@ -163,7 +166,7 @@ class BotInitializer:
         """Background task to clean up expired OTPs"""
         while True:
             try:
-                await asyncio.sleep(60)  # Clean every minute
+                await asyncio.sleep(60)
                 cleaned = otp_manager.cleanup()
                 if cleaned > 0:
                     logger.debug(f"Cleaned up {cleaned} expired OTPs")
@@ -175,13 +178,10 @@ class BotInitializer:
         logger.info("🛑 Shutting down bot...")
         
         try:
-            # Close database pool
             await Database.close_pool()
             logger.info("✅ Database pool closed")
-            
             self._initialized = False
             logger.info("✅ Bot shutdown complete")
-            
         except Exception as e:
             logger.error(f"Shutdown error: {e}")
     
@@ -229,10 +229,10 @@ def get_status() -> Dict[str, Any]:
     }
 
 
-# ==================== FASTAPI COMPATIBILITY (if needed) ====================
+# ==================== FASTAPI COMPATIBILITY (OPTIONAL - SAFE IMPORTS) ====================
 
 def create_fastapi_app():
-    """Create FastAPI app for API endpoints (optional)"""
+    """Create FastAPI app for API endpoints (optional - requires fastapi installed)"""
     try:
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
@@ -243,7 +243,6 @@ def create_fastapi_app():
             version=__version__
         )
         
-        # Add CORS middleware
         app.add_middleware(
             CORSMiddleware,
             allow_origins=config.CORS_ORIGINS,
@@ -252,7 +251,6 @@ def create_fastapi_app():
             allow_headers=["*"],
         )
         
-        # Health check endpoint
         @app.get("/health")
         async def health_check():
             return get_status()
@@ -260,8 +258,51 @@ def create_fastapi_app():
         return app
         
     except ImportError:
-        logger.debug("FastAPI not installed - skipping FastAPI app creation")
+        # FastAPI not installed - silently return None
         return None
+    except Exception as e:
+        # Log other errors but don't crash
+        logger.debug(f"FastAPI app creation failed: {e}")
+        return None
+
+
+# ==================== HELPER TO CHECK OPTIONAL FEATURES ====================
+
+def is_fastapi_available() -> bool:
+    """Check if FastAPI is available"""
+    try:
+        import fastapi
+        return True
+    except ImportError:
+        return False
+
+
+def is_uvloop_available() -> bool:
+    """Check if uvloop is available"""
+    try:
+        import uvloop
+        return True
+    except ImportError:
+        return False
+
+
+def is_psutil_available() -> bool:
+    """Check if psutil is available"""
+    try:
+        import psutil
+        return True
+    except ImportError:
+        return False
+
+
+def get_available_features() -> Dict[str, bool]:
+    """Get dictionary of available optional features"""
+    return {
+        "fastapi": is_fastapi_available(),
+        "uvloop": is_uvloop_available(),
+        "psutil": is_psutil_available(),
+        "nest_asyncio": __import__('importlib').util.find_spec("nest_asyncio") is not None,
+    }
 
 
 # ==================== EXPORTS ====================
@@ -289,7 +330,7 @@ __all__ = [
     # Keyboards
     'menu',
     'main_menu_inline',
-    'main_menu',  # ← ADDED: Export main_menu alias
+    'main_menu',
     'back_button',
     'confirm_keyboard',
     'deposit_methods_keyboard',
@@ -297,17 +338,11 @@ __all__ = [
     'language_keyboard',
     'admin_keyboard',
     'game_menu_keyboard',
-    'quick_play_keyboard',
-    'cartela_selection_keyboard',
-    'game_control_keyboard',
-    'game_settings_keyboard',
     'game_stats_keyboard',
     'game_leaderboard_keyboard',
-    'in_game_keyboard',
-    'betting_keyboard',
-    'number_selection_keyboard',
-    'game_reply_keyboard',
+    'game_settings_keyboard',
     'game_help_keyboard',
+    'game_reply_keyboard',
     'get_game_keyboard',
     'GAME_KEYBOARD_PRESETS',
     
@@ -398,10 +433,14 @@ __all__ = [
     'get_bot_info',
     'get_status',
     'create_fastapi_app',
+    
+    # Feature checks
+    'is_fastapi_available',
+    'is_uvloop_available',
+    'is_psutil_available',
+    'get_available_features',
 ]
 
 # ==================== AUTO-INITIALIZATION ====================
-# Auto-initialize only if not in test mode and not in interactive mode
 if not sys.argv[0].endswith('pytest') and not hasattr(sys, 'ps1'):
-    # Don't auto-init when importing in interactive shell
-    pass  # Let the main.py handle initialization
+    pass

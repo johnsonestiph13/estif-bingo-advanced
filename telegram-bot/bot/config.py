@@ -1,6 +1,5 @@
 # telegram-bot/bot/config.py
-# Estif Bingo 24/7 - Complete Production Configuration
-# Updated with all game features, security settings, and environment variables
+# Estif Bingo 24/7 - Complete Production Configuration (UPDATED)
 
 import os
 import sys
@@ -58,9 +57,9 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 
 # Game URLs
-GAME_WEB_URL = os.environ.get("GAME_WEB_URL", "https://estif-bingo-advanced-1.onrender.com/player.html")
-BOT_API_URL = os.environ.get("BOT_API_URL", "https://estif-bingo-bot-1.onrender.com")
-ADMIN_URL = os.environ.get("ADMIN_URL", "https://estif-bingo-advanced-1.onrender.com/admin.html")
+GAME_WEB_URL = os.environ.get("GAME_WEB_URL", "https://estif-bingo-game.onrender.com/player.html")
+BOT_API_URL = os.environ.get("BOT_API_URL", "https://estif-bingo-bot.onrender.com")
+ADMIN_URL = os.environ.get("ADMIN_URL", "https://estif-bingo-game.onrender.com/admin.html")
 
 # Game Constants
 CARTELA_PRICE = int(os.environ.get("CARTELA_PRICE", "10"))
@@ -421,40 +420,32 @@ def validate_config() -> bool:
     errors = []
     warnings = []
     
-    # Validate BOT_TOKEN
     if not BOT_TOKEN or ":" not in BOT_TOKEN:
         errors.append("BOT_TOKEN appears invalid (should contain colon)")
     
-    # Validate ADMIN_CHAT_ID
     if not ADMIN_CHAT_ID or not ADMIN_CHAT_ID.isdigit():
         errors.append("ADMIN_CHAT_ID should be numeric")
     
-    # Validate DATABASE_URL
     if not DATABASE_URL.startswith("postgresql://"):
         errors.append("DATABASE_URL should start with postgresql://")
     
-    # Validate FLASK_PORT
     if not 1 <= FLASK_PORT <= 65535:
         errors.append(f"FLASK_PORT {FLASK_PORT} is invalid")
     
-    # Validate WIN_PERCENTAGES
     for p in WIN_PERCENTAGES:
         if p not in [70, 75, 76, 80]:
             warnings.append(f"WIN_PERCENTAGES contains unusual value: {p}")
     
-    # Validate payment methods
     for method in PAYMENT_METHODS:
         if not PAYMENT_ACCOUNTS.get(method):
             warnings.append(f"Payment method {method} has no account number")
     
-    # Validate withdrawal limits
     if MIN_WITHDRAWAL < 0:
         errors.append(f"MIN_WITHDRAWAL cannot be negative: {MIN_WITHDRAWAL}")
     
     if MAX_WITHDRAWAL < MIN_WITHDRAWAL:
         errors.append(f"MAX_WITHDRAWAL ({MAX_WITHDRAWAL}) is less than MIN_WITHDRAWAL ({MIN_WITHDRAWAL})")
     
-    # Log warnings and errors
     for warning in warnings:
         print(f"⚠️ Config warning: {warning}")
     
@@ -468,10 +459,8 @@ def validate_config() -> bool:
 
 # ==================== INITIALIZATION ====================
 
-# Create global config instance
 config = Config()
 
-# Validate configuration on import (unless in testing)
 if __name__ != "__main__":
     try:
         if not validate_config():
@@ -479,7 +468,6 @@ if __name__ != "__main__":
     except Exception as e:
         print(f"⚠️ Config validation error: {e}")
 
-# Print configuration summary in development
 if not is_production():
     print("""
 ╔═══════════════════════════════════════════════════════════════════════════════════╗
@@ -510,6 +498,7 @@ if not is_production():
         ENABLE_REFERRAL, ENABLE_TOURNAMENT, ENABLE_DAILY_BONUS, ""
     ))
 
+
 # ==================== EXPORTS ====================
 
 __all__ = [
@@ -526,7 +515,7 @@ __all__ = [
     'is_development',
     'validate_config',
     
-    # Direct constants (for backward compatibility)
+    # Direct constants
     'BOT_TOKEN',
     'ADMIN_CHAT_ID',
     'DATABASE_URL',

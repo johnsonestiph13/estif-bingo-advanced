@@ -1,338 +1,250 @@
 # telegram-bot/bot/handlers/transfer.py
-# ULTRA OPTIMIZED - Complete Transfer Handler (Standalone, No Conflicts)
+# Estif Bingo 24/7 - Transfer Handler (Complete Working Version)
 
 import logging
 import re
-from datetime import datetime
-from typing import Dict, Optional, Tuple
-from decimal import Decimal, ROUND_DOWN
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackContext, ConversationHandler
-
+from telegram.ext import ContextTypes, ConversationHandler
 from bot.db.database import Database
-from bot.keyboards.menu import back_button, main_menu_inline
+from bot.texts.locales import TEXTS
+from bot.keyboards.menu import menu
 from bot.config import config
-from bot.texts.emojis import get_emoji
 from bot.utils import logger
+from bot.texts.emojis import get_emoji
 
-# ==================== CONSTANTS ====================
-PHONE_NUMBER, AMOUNT, CONFIRM = range(3)
+# Conversation states
+PHONE_NUMBER = 1
+AMOUNT = 2
+CONFIRM = 3
 
-# Transfer limits from config
-MIN_AMOUNT = config.MIN_TRANSFER
-MAX_AMOUNT = config.MAX_TRANSFER
-DAILY_LIMIT = config.TRANSFER_DAILY_LIMIT
-FEE_PERCENT = config.TRANSFER_FEE_PERCENTAGE
-
-# Anti-spam cache
-_cooldown_cache: Dict[int, datetime] = {}
+logger = logging.getLogger(__name__)
 
 
-# ==================== VALIDATION HELPERS ====================
-def validate_phone(phone: str) -> bool:
-    """Validate Ethiopian phone number"""
-    return bool(re.match(r'^(09|07)[0-9]{8}$', phone))
-
-
-def validate_amount(amount: float) -> Tuple[bool, str]:
-    """Validate transfer amount"""
-    if amount <= 0:
-        return False, "Amount must be greater than 0"
-    if amount < MIN_AMOUNT:
-        return False, f"Minimum transfer amount is {MIN_AMOUNT} ETB"
-    if amount > MAX_AMOUNT:
-        return False, f"Maximum transfer amount is {MAX_AMOUNT} ETB"
-    return True, ""
-
-
-async def check_daily_limit(user_id: int, amount: float) -> Tuple[bool, float]:
-    """Check daily transfer limit"""
-    async with Database._pool.acquire() as conn:
-        today = datetime.now().date()
-        total_sent = await conn.fetchval("""
-            SELECT COALESCE(SUM(ABS(amount)), 0)
-            FROM game_transactions
-            WHERE telegram_id = $1 AND type = 'transfer_out' AND DATE(timestamp) = $2
-        """, user_id, today)
-        
-        total_sent = float(total_sent or 0)
-        if total_sent + amount > DAILY_LIMIT:
-            remaining = DAILY_LIMIT - total_sent
-            return False, remaining
-        return True, DAILY_LIMIT - (total_sent + amount)
-
-
-def check_cooldown(user_id: int) -> Tuple[bool, int]:
-    """Prevent spam (30 second cooldown)"""
-    now = datetime.now()
-    last = _cooldown_cache.get(user_id)
+async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start transfer flow - Show transfer instructions"""
+    telegram_id = update.effective_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
     
-    if last:
-        elapsed = (now - last).total_seconds()
-        if elapsed < 30:
-            return False, int(30 - elapsed)
+    if not user or not user.get('registered'):
+        await update.message.reply_text(
+            f"{get_emoji('error')} Please register first using /register",
+            reply_markup=menu(lang),
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     
-    _cooldown_cache[user_id] = now
-    return True, 0
-
-
-# ==================== MAIN HANDLERS ====================
-async def transfer(update: Update, context: CallbackContext):
-    """Start transfer - Entry point"""
-    query = update.callback_query
-    user_id = update.effective_user.id
-    
-    # Clear any existing data
+    # Clear any existing transfer data
     context.user_data.clear()
     
-    message = (
+    await update.message.reply_text(
         f"{get_emoji('transfer')} *BALANCE TRANSFER*\n\n"
         f"Send money to another player instantly!\n\n"
         f"{get_emoji('info')} *Rules:*\n"
-        f"• Minimum: `{MIN_AMOUNT} ETB`\n"
-        f"• Maximum: `{MAX_AMOUNT} ETB`\n"
-        f"• Daily limit: `{DAILY_LIMIT} ETB`\n"
-        f"• Fee: `{FEE_PERCENT}%`\n\n"
-        f"{get_emoji('phone')} *Enter receiver's phone number:*\n"
+        f"• Minimum: {config.MIN_TRANSFER} ETB\n"
+        f"• Maximum: {config.MAX_TRANSFER} ETB\n"
+        f"• Daily limit: {config.TRANSFER_DAILY_LIMIT} ETB\n"
+        f"• Fee: {config.TRANSFER_FEE_PERCENTAGE}%\n\n"
+        f"{get_emoji('phone')} Please enter the receiver's phone number:\n"
         f"Example: `0912345678` or `0712345678`\n\n"
-        f"Type /cancel to cancel."
+        f"Type /cancel to cancel.",
+        parse_mode='Markdown'
     )
-    
-    reply_markup = back_button("main")
-    
-    if query:
-        await query.answer()
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
-    
     return PHONE_NUMBER
 
 
-async def transfer_phone(update: Update, context: CallbackContext):
-    """Handle phone number input"""
-    phone = update.message.text.strip()
-    user_id = update.effective_user.id
+async def transfer_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process receiver's phone number"""
+    telegram_id = update.effective_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
     
-    # Check self-transfer
-    sender = await Database.get_user(user_id)
-    if sender and sender.get('phone') == phone:
+    phone = update.message.text.strip()
+    
+    # Check if user is trying to transfer to themselves
+    if user.get('phone') == phone:
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ You cannot transfer money to yourself!\n\n"
-            f"Please enter a different phone number.",
-            reply_markup=back_button("transfer"),
+            f"{get_emoji('error')} You cannot transfer money to yourself!\n\n"
+            f"Please enter a different phone number.\n\n"
+            f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return PHONE_NUMBER
     
-    # Validate format
-    if not validate_phone(phone):
+    # Validate phone format
+    if not re.match(r'^(09|07)[0-9]{8}$', phone):
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ Invalid phone number!\n\n"
-            f"Please use format: `09XXXXXXXX` or `07XXXXXXXX`\n"
-            f"Example: `0912345678`\n\n"
+            f"{get_emoji('error')} Invalid phone number format!\n\n"
+            f"Please enter a valid Ethiopian phone number:\n"
+            f"• Starting with 09 (e.g., 0912345678)\n"
+            f"• Or starting with 07 (e.g., 0712345678)\n\n"
             f"Type /cancel to cancel.",
-            reply_markup=back_button("transfer"),
             parse_mode='Markdown'
         )
         return PHONE_NUMBER
     
     # Find receiver
     receiver = await Database.get_user_by_phone(phone)
-    if not receiver:
+    if not receiver or not receiver.get('registered'):
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ User not found!\n\n"
-            f"No registered user with phone number `{phone}`.\n"
-            f"Make sure the user has registered first.\n\n"
+            f"{get_emoji('error')} User not found!\n\n"
+            f"No user registered with phone number `{phone}`.\n\n"
+            f"Please check the number or ask them to register first.\n\n"
             f"Type /cancel to cancel.",
-            reply_markup=back_button("transfer"),
-            parse_mode='Markdown'
-        )
-        return PHONE_NUMBER
-    
-    if not receiver.get('registered'):
-        await update.message.reply_text(
-            f"{get_emoji('error')} ❌ User not fully registered!\n\n"
-            f"This user has not completed registration.\n\n"
-            f"Type /cancel to cancel.",
-            reply_markup=back_button("transfer"),
             parse_mode='Markdown'
         )
         return PHONE_NUMBER
     
     # Store receiver info
     context.user_data['receiver'] = {
-        'id': receiver['telegram_id'],
-        'name': receiver.get('username') or receiver.get('first_name', 'Unknown'),
+        'telegram_id': receiver['telegram_id'],
+        'username': receiver.get('username') or receiver.get('first_name', 'Unknown'),
         'phone': phone
     }
     
-    # Get sender balance
-    balance = await Database.get_balance(user_id)
+    # Get sender's balance
+    sender_balance = await Database.get_balance(telegram_id)
     
     await update.message.reply_text(
-        f"{get_emoji('success')} ✅ *Receiver Found!*\n\n"
-        f"{get_emoji('user')} Name: *{context.user_data['receiver']['name']}*\n"
+        f"{get_emoji('success')} *Receiver Found!*\n\n"
+        f"{get_emoji('user')} Name: *{context.user_data['receiver']['username']}*\n"
         f"{get_emoji('phone')} Phone: `{phone}`\n\n"
-        f"{get_emoji('money')} Your balance: `{balance:.2f} ETB`\n"
-        f"{get_emoji('info')} Transfer fee: `{FEE_PERCENT}%`\n\n"
-        f"*Enter amount to transfer:*\n"
-        f"Minimum: `{MIN_AMOUNT} ETB` | Maximum: `{MAX_AMOUNT} ETB`\n\n"
+        f"{get_emoji('money')} Your Balance: `{sender_balance:.2f} ETB`\n"
+        f"{get_emoji('info')} Transfer Fee: {config.TRANSFER_FEE_PERCENTAGE}%\n\n"
+        f"Please enter the amount to transfer (Min: {config.MIN_TRANSFER} ETB, Max: {config.MAX_TRANSFER} ETB):\n\n"
         f"Type /cancel to cancel.",
-        parse_mode='Markdown',
-        reply_markup=back_button("transfer")
+        parse_mode='Markdown'
     )
     return AMOUNT
 
 
-async def transfer_amount(update: Update, context: CallbackContext):
-    """Handle amount input"""
-    user_id = update.effective_user.id
+async def transfer_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process amount input"""
+    telegram_id = update.effective_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
     
-    # Parse amount
-    try:
-        amount = float(update.message.text.strip())
-    except ValueError:
+    text = update.message.text.strip()
+    nums = re.findall(r"\d+\.?\d*", text)
+    
+    if not nums:
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ Invalid amount!\n\n"
-            f"Please enter a valid number (e.g., `100`, `50.50`)\n\n"
+            f"{get_emoji('error')} Please enter a valid amount (e.g., 100)\n\n"
             f"Type /cancel to cancel.",
-            parse_mode='Markdown',
-            reply_markup=back_button("transfer")
+            parse_mode='Markdown'
         )
         return AMOUNT
+    
+    amount = float(nums[0])
     
     # Validate amount
-    is_valid, error = validate_amount(amount)
-    if not is_valid:
+    if amount < config.MIN_TRANSFER:
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ {error}\n\n"
-            f"Please enter a valid amount.\n\n"
+            f"{get_emoji('error')} Minimum transfer amount is {config.MIN_TRANSFER} ETB\n\n"
             f"Type /cancel to cancel.",
-            parse_mode='Markdown',
-            reply_markup=back_button("transfer")
+            parse_mode='Markdown'
         )
         return AMOUNT
     
-    # Check balance with fee
-    balance = await Database.get_balance(user_id)
-    fee = amount * FEE_PERCENT / 100
-    total = amount + fee
-    
-    if balance < total:
+    if amount > config.MAX_TRANSFER:
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ *Insufficient Balance!*\n\n"
-            f"{get_emoji('money')} Your balance: `{balance:.2f} ETB`\n"
-            f"{get_emoji('transfer')} Transfer amount: `{amount:.2f} ETB`\n"
-            f"{get_emoji('info')} Fee ({FEE_PERCENT}%): `{fee:.2f} ETB`\n"
-            f"{get_emoji('money')} Total needed: `{total:.2f} ETB`\n\n"
-            f"Shortfall: `{total - balance:.2f} ETB`\n\n"
-            f"Please enter a smaller amount or use /deposit.\n\n"
+            f"{get_emoji('error')} Maximum transfer amount is {config.MAX_TRANSFER} ETB\n\n"
             f"Type /cancel to cancel.",
-            parse_mode='Markdown',
-            reply_markup=back_button("transfer")
+            parse_mode='Markdown'
         )
         return AMOUNT
     
-    # Check daily limit
-    within_limit, remaining = await check_daily_limit(user_id, amount)
-    if not within_limit:
+    # Check balance
+    current_balance = user.get('balance', 0)
+    fee = (amount * config.TRANSFER_FEE_PERCENTAGE) / 100
+    total_deduction = amount + fee
+    
+    if current_balance < total_deduction:
         await update.message.reply_text(
-            f"{get_emoji('error')} ❌ *Daily Limit Reached!*\n\n"
-            f"Daily limit: `{DAILY_LIMIT} ETB`\n"
-            f"Remaining today: `{remaining:.2f} ETB`\n"
-            f"Requested: `{amount:.2f} ETB`\n\n"
-            f"Please try a smaller amount or try again tomorrow.\n\n"
+            f"{get_emoji('error')} *Insufficient Balance!*\n\n"
+            f"{get_emoji('money')} Your Balance: `{current_balance:.2f} ETB`\n"
+            f"{get_emoji('transfer')} Transfer Amount: `{amount:.2f} ETB`\n"
+            f"{get_emoji('info')} Fee: `{fee:.2f} ETB`\n"
+            f"{get_emoji('money')} Total Deduction: `{total_deduction:.2f} ETB`\n\n"
+            f"Please enter a smaller amount or use /deposit to add funds.\n\n"
             f"Type /cancel to cancel.",
-            parse_mode='Markdown',
-            reply_markup=back_button("transfer")
+            parse_mode='Markdown'
         )
         return AMOUNT
     
-    # Check cooldown
-    can_transfer, wait = check_cooldown(user_id)
-    if not can_transfer:
-        await update.message.reply_text(
-            f"{get_emoji('clock')} ⏰ *Please wait!*\n\n"
-            f"You can make another transfer in `{wait}` seconds.\n\n"
-            f"This prevents spam and errors.\n\n"
-            f"Type /cancel to cancel.",
-            parse_mode='Markdown',
-            reply_markup=back_button("transfer")
-        )
-        return AMOUNT
-    
-    # Store amount
-    context.user_data['amount'] = amount
-    context.user_data['fee'] = fee
-    context.user_data['total'] = total
+    # Store transfer details
+    context.user_data['transfer_amount'] = amount
+    context.user_data['transfer_fee'] = fee
+    context.user_data['total_deduction'] = total_deduction
     
     receiver = context.user_data['receiver']
     
     # Create confirmation keyboard
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(f"{get_emoji('success')} ✅ CONFIRM", callback_data="transfer_confirm"),
-            InlineKeyboardButton(f"{get_emoji('error')} ❌ CANCEL", callback_data="transfer_cancel")
+            InlineKeyboardButton(f"{get_emoji('success')} Confirm Transfer", callback_data="transfer_confirm"),
+            InlineKeyboardButton(f"{get_emoji('error')} Cancel", callback_data="transfer_cancel")
         ]
     ])
     
     await update.message.reply_text(
-        f"{get_emoji('question')} *TRANSFER CONFIRMATION*\n\n"
-        f"{get_emoji('user')} *To:* {receiver['name']}\n"
+        f"{get_emoji('question')} *Transfer Confirmation*\n\n"
+        f"{get_emoji('user')} *To:* {receiver['username']}\n"
         f"{get_emoji('phone')} *Phone:* `{receiver['phone']}`\n"
         f"{get_emoji('money')} *Amount:* `{amount:.2f} ETB`\n"
-        f"{get_emoji('info')} *Fee ({FEE_PERCENT}%):* `{fee:.2f} ETB`\n"
-        f"{get_emoji('money')} *Total deduction:* `{total:.2f} ETB`\n\n"
-        f"{get_emoji('warning')} ⚠️ *This action cannot be undone!*\n\n"
-        f"*Confirm transfer?*",
-        parse_mode='Markdown',
-        reply_markup=keyboard
+        f"{get_emoji('info')} *Fee:* `{fee:.2f} ETB`\n"
+        f"{get_emoji('money')} *Total Deduction:* `{total_deduction:.2f} ETB`\n\n"
+        f"{get_emoji('warning')} *This action cannot be undone!*\n\n"
+        f"Please confirm the transfer.",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
     )
     return CONFIRM
 
 
-async def transfer_confirm(update: Update, context: CallbackContext):
-    """Process confirmed transfer"""
+async def transfer_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm and execute transfer"""
     query = update.callback_query
     await query.answer()
     
     sender_id = query.from_user.id
-    receiver = context.user_data.get('receiver')
-    amount = context.user_data.get('amount')
-    fee = context.user_data.get('fee', 0)
-    total = context.user_data.get('total', amount + fee)
+    sender = await Database.get_user(sender_id)
+    lang = sender.get('lang', 'en') if sender else 'en'
     
-    # Validate session data
+    receiver = context.user_data.get('receiver')
+    amount = context.user_data.get('transfer_amount')
+    fee = context.user_data.get('transfer_fee', 0)
+    total_deduction = context.user_data.get('total_deduction', amount + fee)
+    
     if not receiver or not amount:
         await query.edit_message_text(
-            f"{get_emoji('error')} ❌ *Session Expired!*\n\n"
-            f"Please start over with /transfer",
-            reply_markup=main_menu_inline(await Database.get_user(sender_id)),
+            f"{get_emoji('error')} Transfer session expired. Please start over with /transfer.",
             parse_mode='Markdown'
         )
+        context.user_data.clear()
         return ConversationHandler.END
     
-    receiver_id = receiver['id']
+    receiver_id = receiver['telegram_id']
     
     # Double-check balance
     sender_balance = await Database.get_balance(sender_id)
-    if sender_balance < total:
+    if sender_balance < total_deduction:
         await query.edit_message_text(
-            f"{get_emoji('error')} ❌ *Transfer Failed!*\n\n"
-            f"Insufficient balance.\n"
-            f"Your balance: `{sender_balance:.2f} ETB`\n"
-            f"Required: `{total:.2f} ETB`\n\n"
-            f"Please try again.",
-            parse_mode='Markdown',
-            reply_markup=main_menu_inline(await Database.get_user(sender_id))
+            f"{get_emoji('error')} *Transfer Failed - Insufficient Balance*\n\n"
+            f"{get_emoji('money')} Your Balance: `{sender_balance:.2f} ETB`\n"
+            f"{get_emoji('money')} Required: `{total_deduction:.2f} ETB`\n\n"
+            f"Please try again with a smaller amount.",
+            reply_markup=menu(lang),
+            parse_mode='Markdown'
         )
+        context.user_data.clear()
         return ConversationHandler.END
     
     try:
-        # Execute transfer
-        await Database.deduct_balance(sender_id, total, "transfer_out")
+        # Deduct from sender
+        await Database.deduct_balance(sender_id, total_deduction, "transfer_out")
+        
+        # Add to receiver
         await Database.add_balance(receiver_id, amount, "transfer_in")
         
         # Get updated balances
@@ -341,9 +253,9 @@ async def transfer_confirm(update: Update, context: CallbackContext):
         
         # Success message to sender
         success_msg = (
-            f"{get_emoji('success')} ✅ *TRANSFER SUCCESSFUL!*\n\n"
+            f"{get_emoji('success')} *Transfer Successful!*\n\n"
             f"{get_emoji('transfer')} Sent: `{amount:.2f} ETB`\n"
-            f"{get_emoji('user')} To: *{receiver['name']}*\n"
+            f"{get_emoji('user')} To: *{receiver['username']}*\n"
             f"{get_emoji('phone')} Phone: `{receiver['phone']}`\n"
         )
         
@@ -351,125 +263,110 @@ async def transfer_confirm(update: Update, context: CallbackContext):
             success_msg += f"{get_emoji('info')} Fee: `{fee:.2f} ETB`\n"
         
         success_msg += (
-            f"\n{get_emoji('money')} Your new balance: `{new_sender_balance:.2f} ETB`\n\n"
-            f"Thank you for using Estif Bingo! 🎰"
+            f"\n{get_emoji('money')} Your New Balance: `{new_sender_balance:.2f} ETB`\n\n"
+            f"Thank you for using Estif Bingo!"
         )
         
         await query.edit_message_text(
             success_msg,
-            parse_mode='Markdown',
-            reply_markup=main_menu_inline(await Database.get_user(sender_id))
+            reply_markup=menu(lang),
+            parse_mode='Markdown'
         )
         
         # Notify receiver
         try:
-            receiver_msg = (
-                f"{get_emoji('win')} 🎉 *TRANSFER RECEIVED!* 🎉\n\n"
-                f"{get_emoji('money')} Amount: `{amount:.2f} ETB`\n"
-                f"{get_emoji('user')} From: *{query.from_user.username or query.from_user.first_name or 'User'}*\n"
-                f"{get_emoji('money')} Your new balance: `{new_receiver_balance:.2f} ETB`\n\n"
-                f"Use /balance to check your balance.\n"
-                f"Use /play to start playing! 🎮"
-            )
+            receiver_user = await Database.get_user(receiver_id)
+            receiver_lang = receiver_user.get('lang', 'en') if receiver_user else 'en'
+            
             await context.bot.send_message(
                 chat_id=receiver_id,
-                text=receiver_msg,
+                text=(
+                    f"{get_emoji('win')} *You Received a Transfer!*\n\n"
+                    f"{get_emoji('money')} Amount: `{amount:.2f} ETB`\n"
+                    f"{get_emoji('user')} From: *{sender.get('username') or sender.get('first_name', 'User')}*\n"
+                    f"{get_emoji('money')} Your New Balance: `{new_receiver_balance:.2f} ETB`\n\n"
+                    f"Use /balance to check your balance."
+                ),
                 parse_mode='Markdown'
             )
         except Exception as e:
-            logger.warning(f"Could not notify receiver: {e}")
+            logger.warning(f"Could not notify receiver {receiver_id}: {e}")
         
         # Log transaction
         await Database.log_game_transaction(
-            sender_id, query.from_user.username or "User", "transfer_out", -amount,
-            None, None, f"Transfer to {receiver['phone']}"
+            sender_id, sender.get('username', 'User'), "transfer_out", -amount, None, None,
+            f"Transfer to {receiver['phone']}"
         )
         await Database.log_game_transaction(
-            receiver_id, receiver.get('name', 'User'), "transfer_in", amount,
-            None, None, f"Transfer from {query.from_user.username or 'User'}"
+            receiver_id, receiver['username'], "transfer_in", amount, None, None,
+            f"Transfer from {sender.get('username', 'User')}"
         )
         
-        logger.info(f"✅ Transfer: {amount} ETB from {sender_id} to {receiver_id}")
+        logger.info(f"Transfer: {amount} ETB from {sender_id} to {receiver_id}")
         
-    except ValueError as e:
-        logger.error(f"Transfer value error: {e}")
-        await query.edit_message_text(
-            f"{get_emoji('error')} ❌ *Transfer Failed*\n\n{str(e)}",
-            parse_mode='Markdown',
-            reply_markup=main_menu_inline(await Database.get_user(sender_id))
-        )
     except Exception as e:
         logger.error(f"Transfer error: {e}")
         await query.edit_message_text(
-            f"{get_emoji('error')} ❌ *Transfer Failed*\n\n"
-            f"An unexpected error occurred.\n"
-            f"Please try again later.\n\n"
+            f"{get_emoji('error')} *Transfer Failed*\n\n"
+            f"An error occurred. Please try again later.\n\n"
             f"Support: {config.SUPPORT_GROUP_LINK}",
-            parse_mode='Markdown',
-            reply_markup=main_menu_inline(await Database.get_user(sender_id))
+            reply_markup=menu(lang),
+            parse_mode='Markdown'
         )
     
-    # Clear session
     context.user_data.clear()
     return ConversationHandler.END
 
 
-async def transfer_cancel(update: Update, context: CallbackContext):
-    """Cancel transfer (callback query)"""
+async def transfer_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel transfer (callback)"""
     query = update.callback_query
-    user_id = query.from_user.id
-    
     await query.answer()
-    await query.edit_message_text(
-        f"{get_emoji('warning')} ❌ *Transfer Cancelled*\n\n"
-        f"You can start a new transfer anytime from the main menu.",
-        parse_mode='Markdown',
-        reply_markup=main_menu_inline(await Database.get_user(user_id))
-    )
     
+    telegram_id = query.from_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
+    
+    await query.edit_message_text(
+        f"{get_emoji('warning')} Transfer cancelled.\n\n"
+        f"You can start a new transfer anytime from the main menu.",
+        reply_markup=menu(lang),
+        parse_mode='Markdown'
+    )
     context.user_data.clear()
     return ConversationHandler.END
 
 
-async def transfer_cancel_command(update: Update, context: CallbackContext):
-    """Handle /cancel command"""
-    user_id = update.effective_user.id
+async def transfer_cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cancel command during transfer"""
+    telegram_id = update.effective_user.id
+    user = await Database.get_user(telegram_id)
+    lang = user.get('lang', 'en') if user else 'en'
     
     await update.message.reply_text(
-        f"{get_emoji('warning')} ❌ *Transfer Cancelled*\n\n"
-        f"You can start a new transfer anytime from the main menu.\n\n"
+        f"{get_emoji('warning')} Transfer cancelled.\n\n"
         f"Use /transfer to start a new transfer.",
-        parse_mode='Markdown',
-        reply_markup=main_menu_inline(await Database.get_user(user_id))
+        reply_markup=menu(lang),
+        parse_mode='Markdown'
     )
-    
     context.user_data.clear()
     return ConversationHandler.END
 
 
-# ==================== DUMMY HANDLERS FOR COMPATIBILITY ====================
-# These are required by main.py but not used in simplified flow
-async def transfer_add_amount(update: Update, context: CallbackContext):
-    """Dummy handler for +10 button (not used)"""
+# Placeholders for add/subtract (in case main.py calls them)
+async def transfer_add_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        f"{get_emoji('info')} Please use /transfer to start a new transfer.",
-        parse_mode='Markdown'
-    )
+    await query.edit_message_text("Use /transfer to start a new transfer.", parse_mode='Markdown')
 
 
-async def transfer_subtract_amount(update: Update, context: CallbackContext):
-    """Dummy handler for -10 button (not used)"""
+async def transfer_subtract_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        f"{get_emoji('info')} Please use /transfer to start a new transfer.",
-        parse_mode='Markdown'
-    )
+    await query.edit_message_text("Use /transfer to start a new transfer.", parse_mode='Markdown')
 
 
-# ==================== EXPORTS ====================
+# Export all
 __all__ = [
     'transfer',
     'transfer_phone',

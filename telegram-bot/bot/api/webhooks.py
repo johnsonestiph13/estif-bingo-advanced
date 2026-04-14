@@ -1,5 +1,5 @@
-# api/webhooks.py - COMPLETE UPDATED VERSION
-# Estif Bingo 24/7 - Payment Webhook Handlers
+# telegram-bot/bot/api/webhooks.py
+# Estif Bingo 24/7 - Payment Webhook Handlers (UPDATED & COMPATIBLE)
 
 import logging
 import hmac
@@ -8,8 +8,8 @@ import os
 import asyncio
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from ..db.database import Database
-from ..config import Config
+from bot.db.database import Database
+from bot.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ webhook_bp = Blueprint('webhooks', __name__)
 # Payment webhook secret (set in environment variables)
 PAYMENT_WEBHOOK_SECRET = os.environ.get("PAYMENT_WEBHOOK_SECRET", None)
 
+
+# ==================== HELPER FUNCTIONS ====================
 
 def verify_webhook_signature(data: bytes, signature: str, secret: str) -> bool:
     """Verify webhook signature for security"""
@@ -48,6 +50,8 @@ def run_async(coro):
         except Exception:
             pass
 
+
+# ==================== WEBHOOK ENDPOINTS ====================
 
 @webhook_bp.route('/api/webhook/deposit', methods=['POST'])
 def deposit_webhook():
@@ -359,6 +363,8 @@ def webhook_health():
         "webhook_secret_configured": bool(PAYMENT_WEBHOOK_SECRET)
     })
 
+
+# ==================== ERROR HANDLERS ====================
 
 @webhook_bp.errorhandler(401)
 def unauthorized(error):
