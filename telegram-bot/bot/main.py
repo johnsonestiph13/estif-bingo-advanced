@@ -186,6 +186,7 @@ def run_bot():
     
     # Catch-all text handler
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, game_callback))
     
     # ==================== CALLBACK QUERY HANDLERS ====================
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
