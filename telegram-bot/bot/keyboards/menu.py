@@ -7,15 +7,15 @@ def menu(lang='en'):
     """Return main menu keyboard based on language (Reply Keyboard)"""
     if lang == 'am':
         return ReplyKeyboardMarkup([
-            ["🎮 ጨዋታ", "📝 ተመዝገብ", "💰 ገንዘብ አስገባ"],
-            ["💳 ገንዘብ አውጣ", "💸 ገንዘብ አስተላልፍ", "📞 ደንበኛ አገልግሎት"],
-            ["🎉 ጋብዝ", "🔐 የቢንጎ ኮድ"]
+            ["📝 ተመዝገብ", "💰 ገንዘብ አስገባ"],
+            ["💳 ገንዘብ አውጣ", "📞 ደንበኛ አገልግሎት"],
+            ["🎉 ጋብዝ", "💸 ገንዘብ አስተላልፍ", "🔐 የቢንጎ ኮድ"]
         ], resize_keyboard=True)
     else:
         return ReplyKeyboardMarkup([
-            ["🎮 Play", "📝 Register", "💰 Deposit"],
-            ["💳 Cash Out", "💸 Transfer", "📞 Contact Center"],
-            ["🎉 Invite", "🔐 Bingo Code"]
+            ["📝 Register", "💰 Deposit"],
+            ["💳 Cash Out", "📞 Contact Center"],
+            ["🎉 Invite", "💸 Transfer", "🔐 Bingo Code"]
         ], resize_keyboard=True)
 
 
@@ -25,7 +25,6 @@ def main_menu_inline(user):
     
     if lang == 'am':
         keyboard = [
-            [InlineKeyboardButton("🎮 ጨዋታ", callback_data="play")],
             [InlineKeyboardButton("📝 ተመዝገብ", callback_data="register")],
             [InlineKeyboardButton("💰 ገንዘብ አስገባ", callback_data="deposit")],
             [InlineKeyboardButton("💳 ገንዘብ አውጣ", callback_data="cashout")],
@@ -37,7 +36,6 @@ def main_menu_inline(user):
         ]
     else:
         keyboard = [
-            [InlineKeyboardButton("🎮 Play", callback_data="play")],
             [InlineKeyboardButton("📝 Register", callback_data="register")],
             [InlineKeyboardButton("💰 Deposit", callback_data="deposit")],
             [InlineKeyboardButton("💳 Cash Out", callback_data="cashout")],
@@ -52,8 +50,7 @@ def main_menu_inline(user):
 
 
 # ==================== ALIAS FOR BACKWARD COMPATIBILITY ====================
-# Some parts of the code may import 'main_menu' instead of 'main_menu_inline'
-main_menu = main_menu_inline  # ← ADD THIS LINE
+main_menu = main_menu_inline
 
 
 def back_button(target):

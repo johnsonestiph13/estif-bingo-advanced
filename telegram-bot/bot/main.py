@@ -1,6 +1,7 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
 # Includes: Bot, Flask API, Transfer System, Game Handlers, Web App Integration
+# UPDATED: Removed quick-play buttons, fixed deposit/cashout callbacks
 
 import asyncio
 import logging
@@ -49,14 +50,16 @@ def run_bot():
     
     # Import all handlers
     from bot.handlers.start import start, language_callback
-    from bot.handlers.register import register, handle_contact
+    from bot.handlers.register import register, handle_contact, register_phone, PHONE
     from bot.handlers.deposit import (
         deposit, deposit_callback, 
-        handle_deposit_amount, handle_deposit_screenshot
+        deposit_amount, deposit_screenshot, deposit_cancel,
+        AMOUNT as DEPOSIT_AMOUNT, SCREENSHOT
     )
     from bot.handlers.cashout import (
         cashout, cashout_callback, 
-        handle_cashout_amount, handle_cashout_account
+        cashout_amount, cashout_account, cashout_cancel,
+        AMOUNT as CASHOUT_AMOUNT, METHOD, ACCOUNT
     )
     from bot.handlers.balance import balance
     from bot.handlers.invite import invite
@@ -77,11 +80,10 @@ def run_bot():
         PHONE_NUMBER, AMOUNT, CONFIRM
     )
     
-    # Import game handlers (NEW)
+    # Import game handlers (NO quick_play_callback)
     from bot.handlers.game import (
         play_command, game_callback,
-        quick_play_callback, stats_callback,
-        leaderboard_callback, back_to_game_callback,
+        stats_callback, leaderboard_callback, back_to_game_callback,
         start_game_handlers
     )
     
@@ -92,13 +94,13 @@ def run_bot():
     async def handle_all_text(update, context):
         """Handle all text messages that don't match other handlers"""
         # Check for deposit amount first
-        if await handle_deposit_amount(update, context):
+        if await deposit_amount(update, context):
             return
         # Check for cashout amount
-        if await handle_cashout_amount(update, context):
+        if await cashout_amount(update, context):
             return
         # Check for cashout account
-        if await handle_cashout_account(update, context):
+        if await cashout_account(update, context):
             return
         
         # Default response
@@ -123,7 +125,7 @@ def run_bot():
     application.add_handler(CommandHandler("invite", invite))
     application.add_handler(CommandHandler("contact", contact_center))
     
-    # Game commands (NEW)
+    # Game commands
     application.add_handler(CommandHandler("play", play_command))
     
     # Admin commands
@@ -137,7 +139,7 @@ def run_bot():
     
     # ==================== MESSAGE HANDLERS ====================
     # Media handlers
-    application.add_handler(MessageHandler(filters.PHOTO, handle_deposit_screenshot))
+    application.add_handler(MessageHandler(filters.PHOTO, deposit_screenshot))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     
     # Menu button handlers (text matching)
@@ -154,14 +156,13 @@ def run_bot():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text))
     
     # ==================== CALLBACK QUERY HANDLERS ====================
-    # Core callbacks
+    # Core callbacks (FIXED: changed pattern to match full word)
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(deposit_callback, pattern="^dep_"))
-    application.add_handler(CallbackQueryHandler(cashout_callback, pattern="^cash_"))
+    application.add_handler(CallbackQueryHandler(deposit_callback, pattern="^deposit_"))  # FIXED
+    application.add_handler(CallbackQueryHandler(cashout_callback, pattern="^cashout_"))  # FIXED
     application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
     
-    # Game callbacks (NEW)
-    application.add_handler(CallbackQueryHandler(quick_play_callback, pattern="^quick_play_"))
+    # Game callbacks (NO quick_play_callback)
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^game_stats$"))
     application.add_handler(CallbackQueryHandler(leaderboard_callback, pattern="^game_leaderboard$"))
     application.add_handler(CallbackQueryHandler(back_to_game_callback, pattern="^back_to_game$"))
@@ -176,7 +177,7 @@ def run_bot():
     
     # ==================== CONVERSATION HANDLERS ====================
     
-    # ✅ Transfer Conversation Handler
+    # Transfer Conversation Handler
     transfer_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(transfer, pattern="^transfer$"),
@@ -206,9 +207,7 @@ def run_bot():
     )
     application.add_handler(transfer_conv)
     
-    # ✅ Register Conversation Handler (if needed for phone registration)
-    from bot.handlers.register import PHONE, register_phone
-    
+    # Register Conversation Handler
     register_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(register, pattern="^register$"),
@@ -226,9 +225,7 @@ def run_bot():
     )
     application.add_handler(register_conv)
     
-    # ✅ Deposit Amount Conversation Handler
-    from bot.handlers.deposit import AMOUNT as DEPOSIT_AMOUNT, deposit_amount
-    
+    # Deposit Conversation Handler (FIXED: added SCREENSHOT state)
     deposit_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(deposit, pattern="^deposit$"),
@@ -237,39 +234,41 @@ def run_bot():
         states={
             DEPOSIT_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, deposit_amount)
+            ],
+            SCREENSHOT: [
+                MessageHandler(filters.PHOTO, deposit_screenshot)
             ]
         },
-        fallbacks=[CommandHandler("cancel", transfer_cancel_command)],
+        fallbacks=[CommandHandler("cancel", deposit_cancel)],
         name="deposit_conversation",
         persistent=False
     )
     application.add_handler(deposit_conv)
     
-    # ✅ Cashout Conversation Handler
-    from bot.handlers.cashout import AMOUNT as CASHOUT_AMOUNT, METHOD, cashout_amount, cashout_method
-    
+    # Cashout Conversation Handler (FIXED: states order)
     cashout_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cashout, pattern="^cashout$"),
             MessageHandler(filters.Regex("💳 Cash Out|💳 ገንዘብ አውጣ"), cashout)
         ],
         states={
+            METHOD: [
+                CallbackQueryHandler(cashout_callback, pattern="^cashout_")
+            ],
             CASHOUT_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cashout_amount)
             ],
-            METHOD: [
-                CallbackQueryHandler(cashout_method, pattern="^cashout_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cashout_method)
+            ACCOUNT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cashout_account)
             ]
         },
-        fallbacks=[CommandHandler("cancel", transfer_cancel_command)],
+        fallbacks=[CommandHandler("cancel", cashout_cancel)],
         name="cashout_conversation",
         persistent=False
     )
     application.add_handler(cashout_conv)
     
     # ==================== WEB APP DATA HANDLER ====================
-    # Handle data from web app game
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, game_callback))
     
     # ==================== ERROR HANDLER ====================
