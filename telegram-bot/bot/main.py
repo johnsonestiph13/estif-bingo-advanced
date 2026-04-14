@@ -60,7 +60,7 @@ def run_bot():
     from bot.handlers.balance import balance
     from bot.handlers.invite import invite
     from bot.handlers.contact import contact_center
-    from bot.handlers.bingo_otp import bingo_otp
+    from bot.handlers.bingo_otp import bingo_otp, verify_otp
     from bot.handlers.admin_commands import (
         approve_deposit, reject_deposit,
         approve_cashout, reject_cashout,
