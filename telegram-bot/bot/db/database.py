@@ -114,8 +114,8 @@ class Database:
 
     # ==================== TABLE INITIALIZATION ====================
     
-    @classmethod
-    async def _init_tables(cls):
+@classmethod
+async def _init_tables(cls):
     """Create all necessary tables if they don't exist"""
     async with cls._pool.acquire() as conn:
         # Users table
@@ -279,7 +279,6 @@ class Database:
         await cls._create_indexes(conn)
         
     logger.info("✅ Database tables ready")
-
     @classmethod
     async def _ensure_columns(cls):
         """Ensure all required columns exist in users table"""
