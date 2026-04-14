@@ -1,4 +1,6 @@
 # bot/handlers/game.py
+# Estif Bingo 24/7 - Game Handler (Simplified - No Game Server Check)
+
 import json
 import asyncio
 import time
@@ -104,7 +106,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Build web app URL with auth code and user ID
         web_app_url = f"{config.GAME_WEB_URL}?code={auth_code}&telegram_id={telegram_id}"
         
-        # Create inline keyboard with Play Now button
+        # Create inline keyboard with Play Now button (ALWAYS sends web app)
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(
                 f"{get_emoji('game')} PLAY NOW {get_emoji('game')}",

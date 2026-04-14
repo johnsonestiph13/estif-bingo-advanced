@@ -1,6 +1,6 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Removed unused imports, added proper conversation states
+# FIXED: Correct conversation state imports for cashout and transfer
 
 import asyncio
 import logging
@@ -107,7 +107,7 @@ def run_bot():
         set_win_percentage, stats_command
     )
     
-    # Import transfer handlers
+    # Import transfer handlers with correct state constants
     from bot.handlers.transfer import (
         transfer, transfer_phone, transfer_amount, 
         transfer_confirm, transfer_cancel, transfer_cancel_command,
@@ -262,7 +262,7 @@ def run_bot():
     )
     application.add_handler(deposit_conv)
     
-    # Cashout Conversation Handler
+    # Cashout Conversation Handler - FIXED: Using correct state names
     cashout_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cashout, pattern="^cashout$"),

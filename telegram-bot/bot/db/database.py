@@ -14,13 +14,15 @@ import secrets
 try:
     from bot.config import (
         DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE,
-        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
+        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS,
+        OTP_EXPIRY_MINUTES
     )
 except ImportError:
     # Fallback for local development
     from config import (
         DATABASE_URL, DB_MIN_SIZE, DB_MAX_SIZE,
-        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS
+        DB_COMMAND_TIMEOUT, SKIP_AUTO_MIGRATIONS,
+        OTP_EXPIRY_MINUTES
     )
 
 logger = logging.getLogger(__name__)
@@ -452,7 +454,7 @@ class Database:
     @classmethod
     async def store_otp(cls, telegram_id: int, otp: str) -> None:
         """Store OTP code for user"""
-        expires_at = datetime.utcnow() + timedelta(minutes=5)
+        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
         async with cls._pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO otp_codes (telegram_id, otp, expires_at, created_at)

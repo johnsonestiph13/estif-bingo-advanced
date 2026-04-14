@@ -7,17 +7,22 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.db.database import Database
 from bot.texts.locales import TEXTS
-from bot.keyboards.menu import menu
+from bot.keyboards.menu import menu, back_button, main_menu_inline
 from bot.config import config
-from bot.utils import logger
 from bot.texts.emojis import get_emoji
+
+logger = logging.getLogger(__name__)
 
 # Conversation states
 PHONE_NUMBER = 1
 AMOUNT = 2
 CONFIRM = 3
 
-logger = logging.getLogger(__name__)
+# Transfer limits from config
+MIN_TRANSFER = config.MIN_TRANSFER
+MAX_TRANSFER = config.MAX_TRANSFER
+DAILY_LIMIT = config.TRANSFER_DAILY_LIMIT
+FEE = config.TRANSFER_FEE_PERCENTAGE
 
 
 async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,10 +46,10 @@ async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{get_emoji('transfer')} *BALANCE TRANSFER*\n\n"
         f"Send money to another player instantly!\n\n"
         f"{get_emoji('info')} *Rules:*\n"
-        f"• Minimum: {config.MIN_TRANSFER} ETB\n"
-        f"• Maximum: {config.MAX_TRANSFER} ETB\n"
-        f"• Daily limit: {config.TRANSFER_DAILY_LIMIT} ETB\n"
-        f"• Fee: {config.TRANSFER_FEE_PERCENTAGE}%\n\n"
+        f"• Minimum: {MIN_TRANSFER} ETB\n"
+        f"• Maximum: {MAX_TRANSFER} ETB\n"
+        f"• Daily limit: {DAILY_LIMIT} ETB\n"
+        f"• Fee: {FEE}%\n\n"
         f"{get_emoji('phone')} Please enter the receiver's phone number:\n"
         f"Example: `0912345678` or `0712345678`\n\n"
         f"Type /cancel to cancel.",
@@ -110,8 +115,8 @@ async def transfer_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{get_emoji('user')} Name: *{context.user_data['receiver']['username']}*\n"
         f"{get_emoji('phone')} Phone: `{phone}`\n\n"
         f"{get_emoji('money')} Your Balance: `{sender_balance:.2f} ETB`\n"
-        f"{get_emoji('info')} Transfer Fee: {config.TRANSFER_FEE_PERCENTAGE}%\n\n"
-        f"Please enter the amount to transfer (Min: {config.MIN_TRANSFER} ETB, Max: {config.MAX_TRANSFER} ETB):\n\n"
+        f"{get_emoji('info')} Transfer Fee: {FEE}%\n\n"
+        f"Please enter the amount to transfer (Min: {MIN_TRANSFER} ETB, Max: {MAX_TRANSFER} ETB):\n\n"
         f"Type /cancel to cancel.",
         parse_mode='Markdown'
     )
@@ -138,17 +143,17 @@ async def transfer_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = float(nums[0])
     
     # Validate amount
-    if amount < config.MIN_TRANSFER:
+    if amount < MIN_TRANSFER:
         await update.message.reply_text(
-            f"{get_emoji('error')} Minimum transfer amount is {config.MIN_TRANSFER} ETB\n\n"
+            f"{get_emoji('error')} Minimum transfer amount is {MIN_TRANSFER} ETB\n\n"
             f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
         return AMOUNT
     
-    if amount > config.MAX_TRANSFER:
+    if amount > MAX_TRANSFER:
         await update.message.reply_text(
-            f"{get_emoji('error')} Maximum transfer amount is {config.MAX_TRANSFER} ETB\n\n"
+            f"{get_emoji('error')} Maximum transfer amount is {MAX_TRANSFER} ETB\n\n"
             f"Type /cancel to cancel.",
             parse_mode='Markdown'
         )
@@ -156,7 +161,7 @@ async def transfer_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check balance
     current_balance = user.get('balance', 0)
-    fee = (amount * config.TRANSFER_FEE_PERCENTAGE) / 100
+    fee = (amount * FEE) / 100
     total_deduction = amount + fee
     
     if current_balance < total_deduction:
@@ -276,7 +281,6 @@ async def transfer_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Notify receiver
         try:
             receiver_user = await Database.get_user(receiver_id)
-            receiver_lang = receiver_user.get('lang', 'en') if receiver_user else 'en'
             
             await context.bot.send_message(
                 chat_id=receiver_id,

@@ -1,4 +1,6 @@
 # bot/handlers/start.py
+# Estif Bingo 24/7 - Language Selection Handler (Always Shows Language Options)
+
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -9,23 +11,15 @@ from bot.texts.emojis import get_emoji
 
 logger = logging.getLogger(__name__)
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send language selection menu on /start"""
+    """Send language selection menu on /start - Always shows language options"""
     try:
         user_id = update.effective_user.id
         logger.info(f"Start command from user: {user_id}")
         
-        user = await Database.get_user(user_id)
-        
-        if user and user.get('lang'):
-            lang = user['lang']
-            logger.info(f"User {user_id} already has language: {lang}")
-            await update.message.reply_text(
-                TEXTS[lang]['welcome'],
-                reply_markup=menu(lang),
-                parse_mode='Markdown'
-            )
-            return
+        # ALWAYS show language selection - don't check for existing language
+        # This ensures users always see the language options
         
         # Show language selection keyboard
         logger.info(f"Showing language selection for user: {user_id}")
@@ -47,6 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{get_emoji('error')} An error occurred. Please try again later.",
             parse_mode='Markdown'
         )
+
 
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle language selection callback"""
@@ -94,5 +89,6 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{get_emoji('error')} An error occurred. Please try /start again.",
             parse_mode='Markdown'
         )
+
 
 __all__ = ['start', 'language_callback']
