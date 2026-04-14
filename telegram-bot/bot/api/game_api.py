@@ -3,7 +3,7 @@ Estif Bingo 24/7 - Game API Endpoints for Telegram Bot
 Handles all game-related API calls from the Node.js game server
 Updated: Added transfer endpoints, better error handling, and enhanced features
 """
-
+from flask_cors import CORS
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import jwt
@@ -23,7 +23,7 @@ from bot.config import Config
 
 # Create blueprint
 game_api_bp = Blueprint('game_api', __name__)
-
+CORS(app, origins=["https://estif-bingo-advanced-1.onrender.com"])
 # ==================== HELPER: Run async functions in Flask ====================
 
 def run_async(async_func, *args, **kwargs):
