@@ -1,9 +1,9 @@
 # telegram-bot/bot/handlers/__init__.py
-# Estif Bingo 24/7 - All Handlers Exports (UPDATED with Game Handlers)
+# Estif Bingo 24/7 - All Handlers Exports (UPDATED - Removed quick_play_callback)
 
 # ==================== CORE HANDLERS ====================
 from .start import start, language_callback
-from .register import register, register_phone, register_cancel, play, PHONE
+from .register import register, handle_contact, register_phone, register_cancel, play, PHONE
 from .balance import balance
 from .invite import invite
 from .contact import contact_center
@@ -13,14 +13,21 @@ from .bingo_otp import bingo_otp
 from .deposit import (
     deposit, 
     deposit_callback, 
-    handle_deposit_amount, 
-    handle_deposit_screenshot
+    deposit_amount, 
+    deposit_screenshot, 
+    deposit_cancel,
+    AMOUNT as DEPOSIT_AMOUNT, 
+    SCREENSHOT
 )
 from .cashout import (
     cashout, 
     cashout_callback, 
-    handle_cashout_amount, 
-    handle_cashout_account
+    cashout_amount, 
+    cashout_account, 
+    cashout_cancel,
+    METHOD, 
+    AMOUNT as CASHOUT_AMOUNT, 
+    ACCOUNT
 )
 
 # ==================== TRANSFER HANDLER ====================
@@ -31,6 +38,8 @@ from .transfer import (
     transfer_confirm,
     transfer_cancel,
     transfer_cancel_command,
+    transfer_add_amount,
+    transfer_subtract_amount,
     PHONE_NUMBER,
     AMOUNT,
     CONFIRM
@@ -41,14 +50,17 @@ from .admin_commands import (
     approve_deposit,
     reject_deposit,
     approve_cashout,
-    reject_cashout
+    reject_cashout,
+    admin_panel,
+    admin_callback,
+    set_win_percentage,
+    stats_command
 )
 
-# ==================== GAME HANDLERS (NEW - ULTRA OPTIMIZED) ====================
+# ==================== GAME HANDLERS (NO quick_play_callback) ====================
 from .game import (
     play_command,           # Main /play command handler
     game_callback,          # Web app data callback handler
-    quick_play_callback,    # Quick play button handler (1-4 cartelas)
     stats_callback,         # Player statistics handler
     leaderboard_callback,   # Leaderboard display handler
     back_to_game_callback,  # Back to game navigation handler
@@ -66,21 +78,32 @@ __all__ = [
     'language_callback',
     'register',
     'handle_contact',
+    'register_phone',
+    'register_cancel',
+    'PHONE',
     'balance',
     'invite',
     'contact_center',
     'bingo_otp',
-    'legacy_play',  # Deprecated, use play_command instead
+    'legacy_play',
+    'play',
     
     # Financial handlers
     'deposit',
     'deposit_callback',
-    'handle_deposit_amount',
-    'handle_deposit_screenshot',
+    'deposit_amount',
+    'deposit_screenshot',
+    'deposit_cancel',
+    'DEPOSIT_AMOUNT',
+    'SCREENSHOT',
     'cashout',
     'cashout_callback',
-    'handle_cashout_amount',
-    'handle_cashout_account',
+    'cashout_amount',
+    'cashout_account',
+    'cashout_cancel',
+    'METHOD',
+    'CASHOUT_AMOUNT',
+    'ACCOUNT',
     
     # Transfer handlers
     'transfer',
@@ -89,6 +112,8 @@ __all__ = [
     'transfer_confirm',
     'transfer_cancel',
     'transfer_cancel_command',
+    'transfer_add_amount',
+    'transfer_subtract_amount',
     'PHONE_NUMBER',
     'AMOUNT',
     'CONFIRM',
@@ -98,15 +123,18 @@ __all__ = [
     'reject_deposit',
     'approve_cashout',
     'reject_cashout',
+    'admin_panel',
+    'admin_callback',
+    'set_win_percentage',
+    'stats_command',
     
-    # Game handlers (NEW)
-    'play_command',          # Main game launcher
-    'game_callback',         # Web app data receiver
-    'quick_play_callback',   # Quick play buttons
-    'stats_callback',        # Player stats
-    'leaderboard_callback',  # Leaderboard
-    'back_to_game_callback', # Navigation
-    'start_game_handlers',   # Background tasks
+    # Game handlers (NO quick_play_callback)
+    'play_command',
+    'game_callback',
+    'stats_callback',
+    'leaderboard_callback',
+    'back_to_game_callback',
+    'start_game_handlers',
 ]
 
 # ==================== HELPER FOR QUICK IMPORT ====================
@@ -123,26 +151,33 @@ def get_all_handlers():
         'deposit': deposit,
         'cashout': cashout,
         'transfer': transfer,
-        'play': play_command,  # Using new play_command
+        'play': play_command,
+        'admin': admin_panel,
+        'setwin': set_win_percentage,
+        'stats': stats_command,
         
         # Callback handlers
         'language_callback': language_callback,
         'deposit_callback': deposit_callback,
         'cashout_callback': cashout_callback,
-        'quick_play_callback': quick_play_callback,
         'stats_callback': stats_callback,
         'leaderboard_callback': leaderboard_callback,
         'back_to_game_callback': back_to_game_callback,
+        'admin_callback': admin_callback,
         
         # Step handlers
-        'handle_deposit_amount': handle_deposit_amount,
-        'handle_deposit_screenshot': handle_deposit_screenshot,
-        'handle_cashout_amount': handle_cashout_amount,
-        'handle_cashout_account': handle_cashout_account,
+        'deposit_amount': deposit_amount,
+        'deposit_screenshot': deposit_screenshot,
+        'deposit_cancel': deposit_cancel,
+        'cashout_amount': cashout_amount,
+        'cashout_account': cashout_account,
+        'cashout_cancel': cashout_cancel,
         'transfer_phone': transfer_phone,
         'transfer_amount': transfer_amount,
         'transfer_confirm': transfer_confirm,
         'transfer_cancel': transfer_cancel,
+        'transfer_add_amount': transfer_add_amount,
+        'transfer_subtract_amount': transfer_subtract_amount,
         
         # Admin handlers
         'approve_deposit': approve_deposit,
@@ -167,14 +202,15 @@ HANDLERS_INFO = {
     ],
     'admin_commands': [
         ('admin', 'Admin control panel'),
-        ('approve', 'Approve pending transactions'),
-        ('reject', 'Reject pending transactions'),
+        ('approve_deposit', 'Approve deposit'),
+        ('reject_deposit', 'Reject deposit'),
+        ('approve_cashout', 'Approve withdrawal'),
+        ('reject_cashout', 'Reject withdrawal'),
         ('stats', 'View bot statistics'),
         ('setwin', 'Set win percentage'),
     ],
     'game_features': [
         'Web App Bingo Game',
-        'Quick Play (1-4 cartelas)',
         'Live Statistics',
         'Leaderboard',
         'Auto-balance updates',

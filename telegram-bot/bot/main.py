@@ -1,6 +1,6 @@
 # telegram-bot/bot/main.py
 # Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Cashout conversation handler with METHOD state
+# FIXED: Removed quick_play_callback, added register_cancel
 
 import asyncio
 import logging
@@ -46,7 +46,7 @@ def run_bot():
     
     # Import all handlers
     from bot.handlers.start import start, language_callback
-    from bot.handlers.register import register, handle_contact, register_phone, PHONE
+    from bot.handlers.register import register, handle_contact, register_phone, register_cancel, PHONE
     from bot.handlers.deposit import (
         deposit, deposit_callback, 
         deposit_amount, deposit_screenshot, deposit_cancel,
@@ -73,10 +73,10 @@ def run_bot():
         transfer, transfer_phone, transfer_amount, 
         transfer_confirm, transfer_cancel, transfer_cancel_command,
         transfer_add_amount, transfer_subtract_amount,
-        PHONE_NUMBER, AMOUNT, CONFIRM
+        PHONE_NUMBER, AMOUNT as TRANSFER_AMOUNT, CONFIRM
     )
     
-    # Import game handlers
+    # Import game handlers (NO quick_play_callback)
     from bot.handlers.game import (
         play_command, game_callback,
         stats_callback, leaderboard_callback, back_to_game_callback,
@@ -150,7 +150,7 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(cashout_callback, pattern="^cashout_"))
     application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
     
-    # Game callbacks
+    # Game callbacks (NO quick_play_callback)
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^game_stats$"))
     application.add_handler(CallbackQueryHandler(leaderboard_callback, pattern="^game_leaderboard$"))
     application.add_handler(CallbackQueryHandler(back_to_game_callback, pattern="^back_to_game$"))
@@ -173,7 +173,7 @@ def run_bot():
         ],
         states={
             PHONE_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, transfer_phone)],
-            AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, transfer_amount)],
+            TRANSFER_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, transfer_amount)],
             CONFIRM: [
                 CallbackQueryHandler(transfer_confirm, pattern="^transfer_confirm$"),
                 CallbackQueryHandler(transfer_cancel, pattern="^transfer_cancel$"),
@@ -222,7 +222,7 @@ def run_bot():
     )
     application.add_handler(deposit_conv)
     
-    # ✅ CASHOUT CONVERSATION HANDLER - FIXED VERSION
+    # Cashout Conversation Handler
     cashout_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cashout, pattern="^cashout$"),
