@@ -1,7 +1,8 @@
 // =====================================================
 // ESTIF BINGO 24/7 - ULTIMATE GAME SERVER (OPTIMIZED)
-// Version: 3.0.0
+// Version: 4.0.0
 // Features: WebSockets, Bot API Integration, Admin Panel
+// FIXED: Added username column to active_round_selections
 // =====================================================
 
 const express = require("express");
@@ -414,6 +415,7 @@ async function initDatabase() {
             )
         `);
         
+        // FIXED: active_round_selections with username column
         await client.query(`
             CREATE TABLE IF NOT EXISTS active_round_selections (
                 round_number INTEGER NOT NULL,
@@ -432,6 +434,12 @@ async function initDatabase() {
                 description TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        `);
+        
+        // Add username column if it exists but missing (for existing tables)
+        await client.query(`
+            ALTER TABLE active_round_selections 
+            ADD COLUMN IF NOT EXISTS username VARCHAR(100)
         `);
         
         // Optimized indexes
@@ -1083,45 +1091,74 @@ async function resetForNextRound() {
     startSelectionTimer();
 }
 
-// ==================== CRASH RECOVERY ====================
+// ==================== CRASH RECOVERY (FIXED) ====================
 async function recoverFromCrash() {
-    const res = await pool.query(`
-        SELECT round_number, cartela_number, telegram_id, username
-        FROM active_round_selections
-        ORDER BY selected_at
-    `);
-    
-    if (res.rows.length === 0) {
-        console.log("No unfinished round found, starting fresh.");
-        return;
+    try {
+        // First, check if username column exists, if not, add it
+        const client = await pool.connect();
+        try {
+            const columnCheck = await client.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'active_round_selections' AND column_name = 'username'
+            `);
+            
+            if (columnCheck.rows.length === 0) {
+                console.log("📦 Adding missing 'username' column to active_round_selections table...");
+                await client.query(`
+                    ALTER TABLE active_round_selections 
+                    ADD COLUMN IF NOT EXISTS username VARCHAR(100)
+                `);
+                console.log("✅ Added username column");
+            }
+        } finally {
+            client.release();
+        }
+        
+        // Now recover with proper column selection
+        const res = await pool.query(`
+            SELECT round_number, cartela_number, telegram_id, username
+            FROM active_round_selections
+            ORDER BY selected_at
+        `);
+        
+        if (res.rows.length === 0) {
+            console.log("No unfinished round found, starting fresh.");
+            return;
+        }
+        
+        const roundNumber = res.rows[0].round_number;
+        console.log(`🔄 Recovering round ${roundNumber} with ${res.rows.length} selections`);
+        
+        gameState.round = roundNumber;
+        gameState.status = "selection";
+        gameState.timer = SELECTION_TIME;
+        gameState.drawnNumbers = [];
+        gameState.winners = [];
+        gameState.gameActive = false;
+        
+        for (const row of res.rows) {
+            globalTakenCartelas.set(row.cartela_number, { 
+                telegramId: row.telegram_id, 
+                username: row.username || "recovering...", 
+                timestamp: Date.now() 
+            });
+        }
+        
+        globalTotalSelectedCartelas = globalTakenCartelas.size;
+        const { totalBetAmount, winnerReward, adminCommission } = calculateRewardPool();
+        gameState.totalBet = totalBetAmount;
+        gameState.winnerReward = winnerReward;
+        gameState.adminCommission = adminCommission;
+        
+        console.log(`✅ Recovered: ${globalTotalSelectedCartelas} cartelas, pool: ${gameState.totalBet.toFixed(2)} ETB`);
+        startSelectionTimer();
+        
+    } catch (err) {
+        console.error("Recovery error:", err);
+        console.log("Starting fresh round due to recovery error");
+        startSelectionTimer();
     }
-    
-    const roundNumber = res.rows[0].round_number;
-    console.log(`🔄 Recovering round ${roundNumber} with ${res.rows.length} selections`);
-    
-    gameState.round = roundNumber;
-    gameState.status = "selection";
-    gameState.timer = SELECTION_TIME;
-    gameState.drawnNumbers = [];
-    gameState.winners = [];
-    gameState.gameActive = false;
-    
-    for (const row of res.rows) {
-        globalTakenCartelas.set(row.cartela_number, { 
-            telegramId: row.telegram_id, 
-            username: row.username || "recovering...", 
-            timestamp: Date.now() 
-        });
-    }
-    
-    globalTotalSelectedCartelas = globalTakenCartelas.size;
-    const { totalBetAmount, winnerReward, adminCommission } = calculateRewardPool();
-    gameState.totalBet = totalBetAmount;
-    gameState.winnerReward = winnerReward;
-    gameState.adminCommission = adminCommission;
-    
-    console.log(`✅ Recovered: ${globalTotalSelectedCartelas} cartelas, pool: ${gameState.totalBet.toFixed(2)} ETB`);
-    startSelectionTimer();
 }
 
 // ==================== ADMIN AUTH ====================
