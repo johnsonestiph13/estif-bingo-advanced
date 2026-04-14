@@ -1,6 +1,6 @@
 # telegram-bot/bot/main.py
-# Estif Bingo 24/7 - COMPLETE UPDATED MAIN FILE
-# FIXED: Correct conversation state imports for cashout and transfer
+# Estif Bingo 24/7 - ULTRA ENHANCED MAIN FILE
+# Features: Multi-instance lock, webhook cleanup, health monitoring, auto-recovery
 
 import asyncio
 import logging
@@ -10,6 +10,10 @@ import traceback
 import os
 import fcntl
 import atexit
+import time
+import signal
+from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,8 +21,19 @@ load_dotenv()
 from bot.config import BOT_TOKEN, FLASK_PORT, LOG_LEVEL, LOG_FORMAT
 from bot.db.database import Database
 
-logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL, logging.INFO))
+# Configure logging
+logging.basicConfig(
+    format=LOG_FORMAT,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('logs/bot.log') if os.path.exists('logs') else logging.NullHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Create logs directory if not exists
+os.makedirs('logs', exist_ok=True)
 
 # ==================== SINGLE INSTANCE LOCK ====================
 _lock_file = None
@@ -27,10 +42,7 @@ def acquire_instance_lock():
     """Acquire a lock to ensure only one bot instance runs"""
     global _lock_file
     try:
-        lock_dir = '/tmp'
-        if not os.path.exists(lock_dir):
-            lock_dir = os.path.dirname(os.path.abspath(__file__))
-        
+        lock_dir = '/tmp' if os.path.exists('/tmp') else os.path.dirname(os.path.abspath(__file__))
         lock_path = os.path.join(lock_dir, 'estif_bingo_bot.lock')
         _lock_file = open(lock_path, 'w')
         fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -52,7 +64,18 @@ def release_instance_lock():
         except Exception as e:
             logger.error(f"Error releasing lock: {e}")
 
+# ==================== SIGNAL HANDLERS ====================
+def setup_signal_handlers():
+    """Setup graceful shutdown handlers"""
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down...")
+        release_instance_lock()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
+# ==================== FLASK API SERVER ====================
 def run_flask():
     """Run Flask in a separate thread for Game API"""
     from flask import Flask, jsonify
@@ -63,7 +86,16 @@ def run_flask():
     
     @app.route('/health', methods=['GET'])
     def health_check():
-        return jsonify({"status": "healthy", "bot": "running", "timestamp": __import__('datetime').datetime.utcnow().isoformat()}), 200
+        return jsonify({
+            "status": "healthy",
+            "bot": "running",
+            "timestamp": datetime.utcnow().isoformat(),
+            "uptime": time.time() - start_time if 'start_time' in dir() else 0
+        }), 200
+    
+    @app.route('/ready', methods=['GET'])
+    def ready_check():
+        return jsonify({"status": "ready"}), 200
     
     from bot.api.game_api import game_api_bp
     app.register_blueprint(game_api_bp)
@@ -75,13 +107,38 @@ def run_flask():
     
     app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True, use_reloader=False)
 
+# ==================== TELEGRAM BOT ====================
+async def cleanup_bot_environment():
+    """Clean up any existing bot sessions and webhooks"""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Delete webhook
+            webhook_response = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook")
+            if webhook_response.status_code == 200:
+                logger.info("✅ Webhook deleted")
+            
+            # Get webhook info to verify
+            info_response = await client.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo")
+            if info_response.status_code == 200:
+                info = info_response.json()
+                if info.get('ok'):
+                    logger.info(f"📡 Webhook info: {info.get('result', {})}")
+            
+            # Clear any pending updates
+            await client.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset=-1&timeout=1")
+            logger.info("✅ Cleared pending updates")
+            
+    except Exception as e:
+        logger.warning(f"Cleanup warning: {e}")
 
 def run_bot():
     """Run Telegram bot in the main thread"""
     from telegram.ext import (
         Application, CommandHandler, MessageHandler, ConversationHandler,
-        filters, CallbackQueryHandler
+        filters, CallbackQueryHandler, Defaults
     )
+    from telegram.constants import ParseMode
     
     # Import all handlers
     from bot.handlers.start import start, language_callback
@@ -106,16 +163,12 @@ def run_bot():
         admin_panel, admin_callback,
         set_win_percentage, stats_command
     )
-    
-    # Import transfer handlers with correct state constants
     from bot.handlers.transfer import (
         transfer, transfer_phone, transfer_amount, 
         transfer_confirm, transfer_cancel, transfer_cancel_command,
         transfer_add_amount, transfer_subtract_amount,
         PHONE_NUMBER, AMOUNT as TRANSFER_AMOUNT, CONFIRM
     )
-    
-    # Import game handlers
     from bot.handlers.game import (
         play_command, game_callback,
         stats_callback, leaderboard_callback, back_to_game_callback,
@@ -126,13 +179,10 @@ def run_bot():
         await play_command(update, context)
     
     async def handle_all_text(update, context):
-        # Check for deposit amount first
         if await deposit_amount(update, context):
             return
-        # Check for cashout amount
         if await cashout_amount(update, context):
             return
-        # Check for cashout account
         if await cashout_account(update, context):
             return
         
@@ -145,8 +195,26 @@ def run_bot():
             reply_markup=menu(lang)
         )
     
-    # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Optimized defaults
+    defaults = Defaults(
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+        disable_notification=False,
+        protect_content=False
+    )
+    
+    # Create application with optimized settings
+    application = Application.builder() \
+        .token(BOT_TOKEN) \
+        .defaults(defaults) \
+        .connect_timeout(20.0) \
+        .read_timeout(20.0) \
+        .write_timeout(20.0) \
+        .get_updates_connect_timeout(20.0) \
+        .get_updates_read_timeout(20.0) \
+        .get_updates_write_timeout(20.0) \
+        .pool_timeout(30.0) \
+        .build()
     
     # ==================== COMMAND HANDLERS ====================
     application.add_handler(CommandHandler("start", start))
@@ -205,7 +273,6 @@ def run_bot():
     
     # ==================== CONVERSATION HANDLERS ====================
     
-    # Transfer Conversation Handler
     transfer_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(transfer, pattern="^transfer$"),
@@ -228,7 +295,6 @@ def run_bot():
     )
     application.add_handler(transfer_conv)
     
-    # Register Conversation Handler
     register_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(register, pattern="^register$"),
@@ -246,7 +312,6 @@ def run_bot():
     )
     application.add_handler(register_conv)
     
-    # Deposit Conversation Handler
     deposit_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(deposit, pattern="^deposit$"),
@@ -262,7 +327,6 @@ def run_bot():
     )
     application.add_handler(deposit_conv)
     
-    # Cashout Conversation Handler - FIXED: Using correct state names
     cashout_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cashout, pattern="^cashout$"),
@@ -301,52 +365,57 @@ def run_bot():
     
     # ==================== START BOT ====================
     logger.info("🤖 Estif Bingo Bot started successfully!")
-    logger.info("📦 Features: Transfer | Game | Deposit | Cashout | Web App")
+    logger.info("📦 Features: Transfer | Game | Deposit | Cashout | Web App | OTP")
     
-    # Reset webhook before starting polling
-    try:
-        import httpx
-        webhook_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
-        response = httpx.post(webhook_url)
-        if response.status_code == 200:
-            logger.info("✅ Webhook cleared before starting polling")
-    except Exception as e:
-        logger.warning(f"Could not clear webhook: {e}")
-    
-    # Run the bot
+    # Run the bot with enhanced polling
     try:
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=['message', 'callback_query', 'web_app_data'],
-            stop_signals=None
+            stop_signals=None,
+            poll_interval=0.5,
+            timeout=30
         )
     except Exception as e:
         logger.error(f"💥 Bot crashed: {e}")
         traceback.print_exc()
         raise
 
+# ==================== MAIN ENTRY POINT ====================
+start_time = time.time()
 
 async def async_main():
     """Async main function for database initialization"""
+    # Clean up any existing bot sessions
+    await cleanup_bot_environment()
+    
+    # Initialize database
     await Database.init_pool()
     logger.info("✅ Database initialized")
     
+    # Initialize game handlers
     from bot.handlers.game import start_game_handlers
     await start_game_handlers()
     logger.info("🎮 Game handlers initialized")
 
-
 def main():
     """Main entry point"""
+    # Setup signal handlers
+    setup_signal_handlers()
+    
+    # Acquire instance lock
     if not acquire_instance_lock():
         sys.exit(1)
     
+    # Run async initialization
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(async_main())
     
+    # Start Flask in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+    
     logger.info(f"🚀 Flask API running on port {FLASK_PORT}")
     logger.info("📡 Endpoints available:")
     logger.info("   - POST /api/verify-code")
@@ -357,9 +426,10 @@ def main():
     logger.info("   - POST /api/transfer")
     logger.info("   - GET  /api/commission")
     logger.info("   - GET  /health")
+    logger.info("   - GET  /ready")
     
+    # Run bot (blocking)
     run_bot()
-
 
 if __name__ == "__main__":
     try:
